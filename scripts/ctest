@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+shopt -s globstar nullglob
+
+for f in test/**/*.c; do
+    path="bin/execs/"${f%.c}""
+    mkdir -p "$(dirname "$path")"
+    gcc -std=c11 -Wall -Wextra -Wpedantic $f -I./src -L./bin/libs -lcdr -o "$path"
+done

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+shopt -s globstar nullglob
+
+mkdir -p bin
+for f in src/**/*.c; do
+    path="bin/"${f%.c}".o"
+    mkdir -p "$(dirname "$path")"
+    gcc -Wall -Wextra -Wpedantic -c $f -o $path
+done

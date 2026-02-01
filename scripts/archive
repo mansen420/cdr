@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+mkdir -p "bin/libs"
+ar rcs "bin/libs/libcdr.a" bin/**/*.o 
