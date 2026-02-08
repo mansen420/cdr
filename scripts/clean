@@ -3,4 +3,4 @@
 test -d ./src || { echo "Run this script from project root";
     exit 1; }
 
-rm -rf bin
+rm -rf build

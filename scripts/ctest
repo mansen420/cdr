@@ -2,8 +2,18 @@
 
 shopt -s globstar nullglob
 
+mkdir -p build
+
+DEBUG="-fsanitize=address,undefined -fno-omit-frame-pointer -O0 -g"
+RELEASE="-O3"
+: "${CC:=bear -a -o build/compile_commands.json -- gcc}"
+: "${CFLAGS:=-Wall -Wextra -Wpedantic -std=c11 -save-temps=obj -fverbose-asm $RELEASE}"
+: "${CPPFLAGS:=-Isrc -Iinclude}"
+: "${LDFLAGS:=-Lbuild/libs}"
+: "${LDLIBS:=-lcdr}"
+
 for f in test/**/*.c; do
-    path="bin/execs/"${f%.c}""
+    path="build/bin/"${f%.c}
     mkdir -p "$(dirname "$path")"
-    gcc -std=c11 -Wall -Wextra -Wpedantic $f -I./src -L./bin/libs -lcdr -o "$path"
+    $CC $CFLAGS $CPPFLAGS "$f" $LDFLAGS $LDLIBS -o "$path"
 done

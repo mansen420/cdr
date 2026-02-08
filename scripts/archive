@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
 
-mkdir -p "bin/libs"
-ar rcs "bin/libs/libcdr.a" bin/**/*.o 
+shopt -s globstar nullglob
+
+mkdir -p "build/libs"
+ar rcs "build/libs/libcdr.a" build/obj/**/*.o 

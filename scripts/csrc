@@ -2,9 +2,13 @@
 
 shopt -s globstar nullglob
 
-mkdir -p bin
+DEBUG="-fsanitize=address,undefined -fno-omit-frame-pointer -O0 -g"
+RELEASE="-O3 -ffast-math -march=haswell"
+: "${CC:=bear -a -o build/compile_commands.json -- gcc}"
+: "${CFLAGS:=-Wall -Wextra -Wpedantic -std=c11 -save-temps=obj -fverbose-asm $RELEASE}"
+mkdir -p build
 for f in src/**/*.c; do
-    path="bin/"${f%.c}".o"
+    path="build/obj/"${f%.c}".o"
     mkdir -p "$(dirname "$path")"
-    gcc -Wall -Wextra -Wpedantic -c $f -o $path
+    $CC $CFLAGS -c $f -o $path
 done
