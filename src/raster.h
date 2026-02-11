@@ -5,11 +5,9 @@
 //`out` must point to in.pxw*in.pxh*bpp(in)*mag^2 bytes
 // and not overlap with in->buf
 struct raster_4u8 upsample_4u8(
-  const struct raster_4u8 in,
-  struct rgba32 *restrict out,
-  unsigned mag);
+  const struct raster_4u8 in, t4u8 *restrict out, unsigned mag);
 struct raster_3u8 upsample_3u8(
-  const struct raster_3u8 in, struct rgb24 *restrict out, unsigned mag);
+  const struct raster_3u8 in, t3u8 *restrict out, unsigned mag);
 
 // downsample with box. acc should have dst.pxw*sizeof(px_t)
 // u32's.
@@ -43,5 +41,22 @@ static inline void rgba2planar(
     *(outb + i + n)        = (rgba + i)->g;
     *(outb + i + n + n)    = (rgba + i)->b;
     *(outb + i + n + n + n)= (rgba + i)->a;
+  }
+}
+
+static inline unsigned n_chn(enum pxfmt fmt)
+{
+  switch(fmt)
+  {
+    case FMT_RGB:
+      return 3;
+    case FMT_RGBA:
+      return 4;
+    case FMT_PRGB:
+      return 3;
+    case FMT_PRGBA:
+      return 4;
+    default: 
+      return 0;
   }
 }

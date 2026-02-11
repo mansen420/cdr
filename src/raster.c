@@ -6,18 +6,22 @@
 #include "utils.h"
 
 #define raster_t struct raster_4u8
-#define px_t rgba32
-raster_t rsubview_4u8(const raster_t r, const irect view)
-{
-  const irect bounds = {{0}, {r.pxw, r.pxh}};
-  const irect clipped= isct_irect(bounds, view);
-  if(clipped.ext.dx == 0 || clipped.ext.dy == 0)
-    return (raster_t){r.buf, r.stride, 0, 0};
-  return (raster_t){r.buf + clipped.p.y * r.stride + clipped.p.x,
-                    r.stride,
-                    clipped.ext.dx,
-                    clipped.ext.dy};
-}
+#define px_t t4u8
+// raster_t rsubview_4u8(const raster_t r, const irect view)
+//{
+//   const irect bounds = {{0}, {r.pxw, r.pxh}};
+//   const irect clipped= isct_irect(bounds, view);
+//   if(clipped.ext.dx == 0 || clipped.ext.dy == 0)
+//     return (raster_t){r.buf, r.stride, 0, 0};
+//   return (raster_t){r.buf + clipped.p.y * r.stride + clipped.p.x,
+//                     r.stride,
+//                     clipped.ext.dx,
+//                     clipped.ext.dy};
+// }
+//
+// void blit_4u8(
+//   const raster_t src, raster_t dst, irect srect, point2i dpos);
+
 void copy_4u8(const raster_t src, raster_t dst)
 {
   if(dst.pxw < src.pxw || dst.pxh < src.pxh)
@@ -38,15 +42,13 @@ void copy_4u8(const raster_t src, raster_t dst)
     memcpy(dstrow, srcrow, src.pxw * sizeof(px_t));
 }
 
-void blit_4u8(
-  const raster_t src, raster_t dst, irect srect, point2i dpos);
-
 raster_t upsample_4u8(
   const raster_t in, px_t *restrict out, unsigned mag)
 {
   const px_t *restrict src= in.buf;
 
-  raster_t res= {out, in.pxw * mag, in.pxw * mag, in.pxh * mag};
+  raster_t res= {
+    out, in.pxw * mag, in.pxw * mag, in.pxh * mag, FMT_RGBA};
   if(mag == 0) return res;
   if(mag == 1)
   {
@@ -139,7 +141,7 @@ void dnsamplebx_4u8(
 #undef raster_t
 #undef px_t
 #define raster_t struct raster_3u8
-#define px_t rgb24
+#define px_t t3u8
 // TODO change this to rcopy_3u8
 void copy_3u8(const raster_t src, raster_t dst)
 {
@@ -166,7 +168,8 @@ raster_t upsample_3u8(
 {
   const px_t *restrict src= in.buf;
 
-  raster_t res= {out, in.pxw * mag, in.pxw * mag, in.pxh * mag};
+  raster_t res= {
+    out, in.pxw * mag, in.pxw * mag, in.pxh * mag, FMT_RGB};
   if(mag == 0) return res;
   if(mag == 1)
   {
