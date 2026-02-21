@@ -14,6 +14,12 @@ dpyctx *dpyinit(
 int dpygeterr(dpyctx *ctx);
 const char *dpyerrstr(DPYERR);
 
+// get native window handle
+void *dpygetnwin(dpyctx *);
+// get native instance handle
+void *dpygetncon(dpyctx *);
+
 int dpypoll(dpyctx *ctx);
 
 void dpyterm(dpyctx *ctx);
+

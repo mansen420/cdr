@@ -58,6 +58,9 @@ typedef struct dpyctx
 
 #include "src/wayland/handlers.inl"
 
+void *dpygetnwin(wlctx *ctx) { return ctx->surf; }
+void *dpygetncon(wlctx *ctx) { return ctx->disp; }
+
 wlctx *dpyinit(const char *title, unsigned w, unsigned h, u32 flags)
 {
   wlctx *ctx= calloc(1, sizeof *ctx);
@@ -121,3 +124,6 @@ void dpyterm(dpyctx *ctx)
   if(ctx->disp) wl_display_disconnect(ctx->disp);
   free(ctx);
 }
+
+#undef OK
+#undef NNUL
