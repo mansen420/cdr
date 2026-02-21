@@ -1,9 +1,8 @@
-#include "raster.h"
+#include "src/raster.h"
 
 #include <string.h>
 
-#include "defs.h"
-#include "utils.h"
+#include "src/utils.h"
 
 #define raster_t struct raster_4u8
 #define px_t t4u8

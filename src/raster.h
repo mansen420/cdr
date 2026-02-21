@@ -1,6 +1,6 @@
 #pragma once
 
-#include "defs.h"
+#include "include/defs.h"
 
 //`out` must point to in.pxw*in.pxh*bpp(in)*mag^2 bytes
 // and not overlap with in->buf

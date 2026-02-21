@@ -1,6 +1,6 @@
 #include <string.h>
 
-#include "defs.h"
+#include "include/defs.h"
 
 // fill a memory region with a repeating pattern src
 // the memory region must contain at least n*src_size bytes

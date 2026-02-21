@@ -2,7 +2,7 @@
 
 #include <stdio.h>
 
-#include "defs.h"
+#include "include/defs.h"
 
 int prnbppm(
   const t3u8 *px,

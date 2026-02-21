@@ -1,6 +1,6 @@
 #include <string.h>
 
-#include "defs.h"
+#include "include/defs.h"
 
 enum rfmt
 {

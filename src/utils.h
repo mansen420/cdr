@@ -1,6 +1,6 @@
 #pragma once 
 
-#include "defs.h"
+#include "include/defs.h"
 #include <string.h>
 
 // divide vector by scalar in-place

@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "defs.h"
 
 int prnbppm(
   const t3u8 *px, unsigned w, unsigned h, byte *img, unsigned imgcap)
