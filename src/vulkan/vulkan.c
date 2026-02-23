@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_wayland.h>
 
 #include "include/display.h"
@@ -25,11 +26,20 @@ typedef struct gfxctx
   VkDevice         dev;
   VkQueue          gfxq;
   VkQueue          prsq;
+  VkSwapchainKHR   swp;
+  u32              nrswpimgs;
+  VkImage          swpimgs[16];
+  VkImageView      swpimgvs[16];
 
-  i32 gfxqfamidx;  // God queues
-  i32 prsqfamidx;
+  // XXX keep these in contiguous memory and keep gfx first. see:
+  // swapchain creation
+  u32 gfxqfamidx;  // God queues
+  u32 prsqfamidx;
 
   // info
+
+  // 1 if graphics and present queues indices are the same
+  u32                        gfxprs;
   VkPhysicalDeviceFeatures   gpufeats;
   VkPhysicalDeviceProperties gpuprops;
   const char               **layers;
@@ -41,6 +51,12 @@ typedef struct gfxctx
   VkQueueFamilyProperties    qfams[16];
   u32                        nrqfams;
   u32                        apiver;
+  VkSurfaceCapabilitiesKHR   gpuscaps;
+  VkSurfaceFormatKHR         gpusfmts[64];
+  u32                        nrgpusfmts;
+  VkPresentModeKHR           prsmodes[8];
+  u32                        nrprsmodes;
+  VkSurfaceFormatKHR         swpsfmt;
 } vkctx;
 
 static vkctx *init(void *dpy)
@@ -142,7 +158,7 @@ static vkctx *init(void *dpy)
     vkGetPhysicalDeviceQueueFamilyProperties(
       ctx->gpu, &ctx->nrqfams, ctx->qfams);
 
-    ctx->gfxqfamidx= ctx->prsqfamidx= -1;
+    ctx->gfxqfamidx= ctx->prsqfamidx= UINT32_MAX;
     for(unsigned i= 0; i < ctx->nrqfams; i++)
     {
       if(ctx->qfams[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
@@ -155,9 +171,16 @@ static vkctx *init(void *dpy)
 
       if(present) ctx->prsqfamidx= i;
 
-      if(ctx->gfxqfamidx >= 0 && ctx->prsqfamidx >= 0) break;
+      if(ctx->gfxqfamidx != UINT32_MAX && ctx->prsqfamidx != UINT32_MAX)
+        break;
     }
-    if(ctx->gfxqfamidx < 0 || ctx->prsqfamidx < 0) goto fail;
+    if(ctx->gfxqfamidx == UINT32_MAX || ctx->prsqfamidx == UINT32_MAX)
+      goto fail;
+
+    if(ctx->gfxqfamidx != ctx->prsqfamidx)
+      ctx->gfxprs= 0;
+    else
+      ctx->gfxprs= 1;
   }
 
   // device
@@ -181,14 +204,16 @@ static vkctx *init(void *dpy)
         .queueCount      = 1,
         .pQueuePriorities= priorities};
     }
-    static const char *devext[]= {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-    ctx->devextensions         = devext;
+    static const char *devext[]= {
+      VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+      VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME};
+    ctx->devextensions= devext;
 
     VkDeviceCreateInfo devinfo= {
       .sType                  = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
       .queueCreateInfoCount   = nrqs,
       .pQueueCreateInfos      = devqs,
-      .enabledExtensionCount  = 1,
+      .enabledExtensionCount  = 2,
       .ppEnabledExtensionNames= devext,
       .pEnabledFeatures       = &ctx->gpufeats  // NULL for no feats
     };
@@ -199,20 +224,135 @@ static vkctx *init(void *dpy)
     vkGetDeviceQueue(ctx->dev, ctx->gfxqfamidx, 0, &ctx->gfxq);
     vkGetDeviceQueue(ctx->dev, ctx->prsqfamidx, 0, &ctx->prsq);
   }
-	
+
+  // swapchain
+  {
+    VkResult res= vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+      ctx->gpu, ctx->surf, &ctx->gpuscaps);
+    OK(res, goto fail;)
+
+    res= vkGetPhysicalDeviceSurfaceFormatsKHR(
+      ctx->gpu, ctx->surf, &ctx->nrgpusfmts, NULL);
+    OK(res, goto fail;)
+    res= vkGetPhysicalDeviceSurfaceFormatsKHR(
+      ctx->gpu, ctx->surf, &ctx->nrgpusfmts, ctx->gpusfmts);
+    OK(res, goto fail;)
+
+    res= vkGetPhysicalDeviceSurfacePresentModesKHR(
+      ctx->gpu, ctx->surf, &ctx->nrprsmodes, NULL);
+    OK(res, goto fail;)
+    if(ctx->nrprsmodes > 8) ctx->nrprsmodes= 8;
+
+    res= vkGetPhysicalDeviceSurfacePresentModesKHR(
+      ctx->gpu, ctx->surf, &ctx->nrprsmodes, ctx->prsmodes);
+    OK(res, goto fail;)
+
+    const VkSurfaceFormatKHR *chosen= &ctx->gpusfmts[0];
+    for(unsigned i= 0; i < ctx->nrgpusfmts; i++)
+      if(
+        ctx->gpusfmts[i].format == VK_FORMAT_B8G8R8A8_SRGB &&
+        ctx->gpusfmts[i].colorSpace ==
+          VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+      {
+        chosen= &ctx->gpusfmts[i];
+        break;
+      }
+
+    VkExtent2D extent;
+    if(
+      ctx->gpuscaps.currentExtent.width == UINT32_MAX &&
+      ctx->gpuscaps.currentExtent.height == UINT32_MAX)
+    {
+      extent.width= 800 > ctx->gpuscaps.maxImageExtent.width
+                      ? ctx->gpuscaps.maxImageExtent.width
+                      : 800;
+
+      extent.height= 600 > ctx->gpuscaps.maxImageExtent.height
+                       ? ctx->gpuscaps.maxImageExtent.height
+                       : 600;
+    }
+    else
+      extent= ctx->gpuscaps.currentExtent;
+    const VkPresentModeKHR *mode= NULL;
+    for(unsigned i= 0; i < ctx->nrprsmodes; i++)
+    {
+      if(ctx->prsmodes[i] == VK_PRESENT_MODE_MAILBOX_KHR)
+        mode= &ctx->prsmodes[i];
+    }
+    if(!mode) mode= &ctx->prsmodes[0];
+
+    VkSwapchainCreateInfoKHR info= {
+      .sType           = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+      .surface         = ctx->surf,
+      .minImageCount   = ctx->gpuscaps.minImageCount + 1,
+      .imageFormat     = chosen->format,
+      .imageColorSpace = chosen->colorSpace,
+      .imageExtent     = extent,
+      .imageArrayLayers= 1,
+      .imageUsage      = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+      .imageSharingMode= ctx->gfxprs ? VK_SHARING_MODE_EXCLUSIVE
+                                     : VK_SHARING_MODE_CONCURRENT,
+      .queueFamilyIndexCount= ctx->gfxprs ? 0 : 2,
+      .pQueueFamilyIndices  = ctx->gfxprs ? NULL : &ctx->gfxqfamidx,
+      .preTransform         = ctx->gpuscaps.currentTransform,
+      .compositeAlpha       = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+      .presentMode          = *mode,
+      .clipped              = VK_TRUE,
+      .oldSwapchain         = VK_NULL_HANDLE};
+
+    res= vkCreateSwapchainKHR(ctx->dev, &info, NULL, &ctx->swp);
+    OK(res, goto fail;)
+    ctx->swpsfmt= *chosen;
+  }
+
+  // img views
+  {
+    VkResult res= vkGetSwapchainImagesKHR(
+      ctx->dev, ctx->swp, &ctx->nrswpimgs, NULL);
+    OK(res, goto fail;)
+    res= vkGetSwapchainImagesKHR(
+      ctx->dev, ctx->swp, &ctx->nrswpimgs, ctx->swpimgs);
+    OK(res, goto fail;)
+
+    for(unsigned i= 0; i < ctx->nrswpimgs; i++)
+    {
+      VkImageViewCreateInfo info= {
+        .sType           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image           = ctx->swpimgs[i],
+        .viewType        = VK_IMAGE_VIEW_TYPE_2D,
+        .format          = ctx->swpsfmt.format,
+        .subresourceRange= {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+      res= vkCreateImageView(ctx->dev, &info, NULL, &ctx->swpimgvs[i]);
+      OK(res, goto fail;)
+    }
+  }
   return ctx;
 fail:
   puts("VK init failed");
   return NULL;
 }
 
+static void term(vkctx *ctx)
+{
+  if(!ctx) return;
+
+  for(unsigned i= 0; i < ctx->nrswpimgs; i++)
+    if(ctx->swpimgvs[i])
+      vkDestroyImageView(ctx->dev, ctx->swpimgvs[i], NULL);
+  if(ctx->swp) vkDestroySwapchainKHR(ctx->dev, ctx->swp, NULL);
+  if(ctx->dev) vkDestroyDevice(ctx->dev, NULL);
+  if(ctx->surf) vkDestroySurfaceKHR(ctx->inst, ctx->surf, NULL);
+  if(ctx->inst) vkDestroyInstance(ctx->inst, NULL);
+  free(ctx);
+}
+
 gfxctx *gfxinit(void *dpy) { return init(dpy); }
+void    gfxterm(gfxctx *ctx) {  term(ctx); }
 
 int main(void)
 {
   dpyctx *dpy= dpyinit("title", 800, 600, 0);
   vkctx  *ctx= init(dpy);
-
 exit:
   free(ctx);
   dpyterm(dpy);
