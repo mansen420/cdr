@@ -124,6 +124,12 @@ void dpyterm(dpyctx *ctx)
   if(ctx->disp) wl_display_disconnect(ctx->disp);
   free(ctx);
 }
-
+int dpypoll(dpyctx *ctx)
+{
+  if (wl_display_flush(ctx->disp) < 0) return -1;
+  if (wl_display_roundtrip(ctx->disp) < 0) return -1;
+	if (ctx->flags & WLCTX_CLOSE) return -1;
+  return 0;
+}
 #undef OK
 #undef NNUL

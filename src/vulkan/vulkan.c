@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_wayland.h>
@@ -59,6 +60,8 @@ typedef struct gfxctx
   // swapchain creation
   u32 gfxqfamidx;  // God queues
   u32 prsqfamidx;
+
+  VkExtent2D swpextent;
 
   // frames
   frmctx frames[8];
@@ -257,7 +260,7 @@ static vkctx *init(void *dpy)
       .sType           = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
       .pNext           = &feats11,
       .dynamicRendering= VK_TRUE,
-    };
+      .synchronization2= VK_TRUE};
 
     VkDeviceCreateInfo devinfo= {
       .sType                  = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -321,6 +324,7 @@ static vkctx *init(void *dpy)
     }
     else
       extent= ctx->gpuscaps.currentExtent;
+
     const VkPresentModeKHR *mode= NULL;
     for(unsigned i= 0; i < ctx->nrprsmodes; i++)
     {
@@ -332,7 +336,7 @@ static vkctx *init(void *dpy)
     VkSwapchainCreateInfoKHR info= {
       .sType           = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
       .surface         = ctx->surf,
-      .minImageCount   = ctx->gpuscaps.minImageCount + 1,
+      .minImageCount   = ctx->gpuscaps.minImageCount + 1,  // XXX may break
       .imageFormat     = chosen->format,
       .imageColorSpace = chosen->colorSpace,
       .imageExtent     = extent,
@@ -350,7 +354,8 @@ static vkctx *init(void *dpy)
 
     res= vkCreateSwapchainKHR(ctx->dev, &info, NULL, &ctx->swp);
     OK(res, goto err;)
-    ctx->swpsfmt= *chosen;
+    ctx->swpsfmt  = *chosen;
+    ctx->swpextent= extent;
   }
   // img views
   {
@@ -398,19 +403,35 @@ static vkctx *init(void *dpy)
 
   return ctx;
 err:
+	gfxterm(ctx);
   puts("VK init erred");
   return NULL;
+}
+
+static void frmterm(vkctx *ctx, u32 idx)
+{
+  if(idx >= ctx->nrframes) goto err;
+
+  frmctx *frm= &ctx->frames[idx];
+  if(frm->fence) vkDestroyFence(ctx->dev, frm->fence, NULL);
+  if(frm->renderfin) vkDestroySemaphore(ctx->dev, frm->renderfin, NULL);
+  if(frm->imggotten) vkDestroySemaphore(ctx->dev, frm->imggotten, NULL);
+
+  return;
+err:
+  return;
 }
 
 static void term(vkctx *ctx)
 {
   if(!ctx) return;
-	vkDeviceWaitIdle(ctx->dev);
+  vkDeviceWaitIdle(ctx->dev);
 
+  for(unsigned i= 0; i < ctx->nrframes; i++) frmterm(ctx, i);
   if(ctx->prscmdpool) vkDestroyCommandPool(ctx->dev, ctx->prscmdpool, NULL);
   if(ctx->gfxcmdpool) vkDestroyCommandPool(ctx->dev, ctx->gfxcmdpool, NULL);
-	for(unsigned i= 0; i < ctx->nrshaders; i++)
-		vkDestroyShaderModule(ctx->dev, ctx->shaders[i], NULL);
+  for(unsigned i= 0; i < ctx->nrshaders; i++)
+    vkDestroyShaderModule(ctx->dev, ctx->shaders[i], NULL);
   if(ctx->gfxppl) vkDestroyPipeline(ctx->dev, ctx->gfxppl, NULL);
   if(ctx->layout) vkDestroyPipelineLayout(ctx->dev, ctx->layout, NULL);
   for(unsigned i= 0; i < ctx->nrswpimgs; i++)
@@ -419,6 +440,8 @@ static void term(vkctx *ctx)
   if(ctx->dev) vkDestroyDevice(ctx->dev, NULL);
   if(ctx->surf) vkDestroySurfaceKHR(ctx->inst, ctx->surf, NULL);
   if(ctx->inst) vkDestroyInstance(ctx->inst, NULL);
+
+	memset(ctx, 0, sizeof *ctx);
   free(ctx);
 }
 
@@ -529,9 +552,13 @@ void    gfxterm(gfxctx *ctx) { term(ctx); }
 
 static int frminit(vkctx *ctx)
 {
-  for(unsigned i= 0; i < ctx->nrframes; i++)
+  if(!ctx) goto err;
+
+  u32 n= ctx->nrswpimgs;
+  for(unsigned i= 0; i < n; i++)
   {
-    frmctx                     *frm      = &ctx->frames[i];
+    frmctx *frm= &ctx->frames[i];
+
     VkCommandBufferAllocateInfo allocinfo= {
       .sType             = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
       .commandPool       = ctx->gfxcmdpool,
@@ -551,15 +578,138 @@ static int frminit(vkctx *ctx)
       .sType= VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
       .flags= VK_FENCE_CREATE_SIGNALED_BIT};
     res= vkCreateFence(ctx->dev, &feninfo, NULL, &frm->fence);
-		OK(res, goto err;)
+    OK(res, goto err;)
   }
+  ctx->nrframes= n;
   return 0;
 err:
   return -1;
 }
 
-static int render(frmctx *frm)
+static int render(vkctx *ctx)
 {
+  static u32 frmidx= 0;
+  frmctx    *frm   = &ctx->frames[frmidx];
+
+  vkWaitForFences(ctx->dev, 1, &frm->fence, VK_TRUE, UINT64_MAX);
+  vkResetFences(ctx->dev, 1, &frm->fence);
+
+  VkSemaphore acqsem= frm->imggotten;
+  u32         imgidx;
+  VkResult    res= vkAcquireNextImageKHR(
+    ctx->dev, ctx->swp, UINT64_MAX, acqsem, VKNULL, &imgidx);
+  OK(res, goto err;)
+
+  VkSemaphore subsem= ctx->frames[imgidx].renderfin;
+  // submit work
+  {
+    // record cmds
+    {
+      vkResetCommandBuffer(frm->cmdbuf, 0);
+      VkCommandBufferBeginInfo binfo= {
+        .sType= VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+      vkBeginCommandBuffer(frm->cmdbuf, &binfo);
+
+      VkImageMemoryBarrier2 renderb= {
+        .sType              = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask       = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+        .dstStageMask       = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask      = VK_ACCESS_2_NONE,
+        .dstAccessMask      = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout          = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout          = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .srcQueueFamilyIndex= VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex= VK_QUEUE_FAMILY_IGNORED,
+        .image              = ctx->swpimgs[imgidx],
+        .subresourceRange   = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+      VkDependencyInfo renderd= {
+        .sType                  = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount= 1,
+        .pImageMemoryBarriers   = &renderb};
+
+      vkCmdPipelineBarrier2(frm->cmdbuf, &renderd);
+
+      VkRenderingAttachmentInfo attinfo= {
+        .sType      = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView  = ctx->swpimgvs[imgidx],
+        .imageLayout= VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .loadOp     = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .storeOp    = VK_ATTACHMENT_STORE_OP_STORE};
+      VkRenderingInfo renderinfo= {
+        .sType               = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .renderArea          = {{0, 0}, ctx->swpextent},
+        .colorAttachmentCount= 1,
+        .pColorAttachments   = &attinfo,
+        .layerCount          = 1};
+      vkCmdBeginRendering(frm->cmdbuf, &renderinfo);
+
+      vkCmdBindPipeline(
+        frm->cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx->gfxppl);
+      VkViewport vp= {
+        0, 0, (f32)ctx->swpextent.width, (f32)ctx->swpextent.height, 0.f, 1.f};
+      vkCmdSetViewport(frm->cmdbuf, 0, 1, &vp);
+      VkRect2D scissor= {.extent= ctx->swpextent};
+      vkCmdSetScissor(frm->cmdbuf, 0, 1, &scissor);
+
+      vkCmdDraw(frm->cmdbuf, 3, 1, 0, 0);
+
+      vkCmdEndRendering(frm->cmdbuf);
+
+      VkImageMemoryBarrier2 prsb= {
+        .sType           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask    = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstStageMask    = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+        .srcAccessMask   = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstAccessMask   = VK_ACCESS_2_NONE,
+        .oldLayout       = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .newLayout       = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .image           = ctx->swpimgs[imgidx],
+        .subresourceRange= {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+      VkDependencyInfo prsd= {
+        .sType                  = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount= 1,
+        .pImageMemoryBarriers   = &prsb};
+
+      vkCmdPipelineBarrier2(frm->cmdbuf, &prsd);
+
+      vkEndCommandBuffer(frm->cmdbuf);
+    }
+    VkSemaphoreSubmitInfo waitinfo= {
+      .sType    = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+      .stageMask= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+      .semaphore= acqsem};
+    VkSemaphoreSubmitInfo siginfo= {
+      .sType    = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+      .stageMask= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+      .semaphore= subsem};
+    VkCommandBufferSubmitInfo cmdinfo= {
+      .sType        = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+      .commandBuffer= frm->cmdbuf};
+    VkSubmitInfo2 subinfo= {
+      .sType                   = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+      .waitSemaphoreInfoCount  = 1,
+      .pWaitSemaphoreInfos     = &waitinfo,
+      .signalSemaphoreInfoCount= 1,
+      .pSignalSemaphoreInfos   = &siginfo,
+      .commandBufferInfoCount  = 1,
+      .pCommandBufferInfos     = &cmdinfo};
+    res= vkQueueSubmit2(ctx->gfxq, 1, &subinfo, frm->fence);
+    OK(res, goto err;)
+  }
+  // present
+  {
+    VkPresentInfoKHR presinfo= {
+      .sType             = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+      .waitSemaphoreCount= 1,
+      .pWaitSemaphores   = &subsem,
+      .swapchainCount    = 1,
+      .pSwapchains       = &ctx->swp,
+      .pImageIndices     = &imgidx};
+    vkQueuePresentKHR(ctx->prsq, &presinfo);
+  }
+
+  frmidx= (frmidx + 1) % ctx->nrframes;
+  return 0;
 err:
   puts("Failure during frame rendering");
   return -1;
@@ -573,7 +723,7 @@ int main(int argc, char **argv)
 {
   int     rc = 0;
   dpyctx *dpy= dpyinit("title", 800, 600, 0);
-  vkctx  *ctx= init(dpy);
+  vkctx  *ctx= gfxinit(dpy);
 
   u32 *shader= NULL;
   u32  nbytes= 0;
@@ -594,9 +744,13 @@ int main(int argc, char **argv)
     if(rdb != nbytes) puts("IO warning");
     close(fd);
   }
-
   rc= mkgfxppl(ctx, shader, nbytes);
+  rc= frminit(ctx);
+  OK(rc, goto exit;)
 
+  while(dpypoll(dpy) == 0) render(ctx);
+
+  vkDeviceWaitIdle(ctx->dev);
 exit:
   gfxterm(ctx);
   dpyterm(dpy);
