@@ -1,3 +1,18 @@
-*.ppm
-build
-.*
+# ignore everything
+*
+
+# un-ignore directories (must be explicit for nested files to work)
+!src/
+!src/*/
+!src/*/*/
+!include/
+!assets/
+!test/
+
+# un-ignore file types
+!*.c
+!*.h
+!*.inl
+!*.slang
+!*.spv
+!*.md
