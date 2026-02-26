@@ -1,11 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
-#include "include/defs.h"
-#include "include/display.h"
-#include "src/wayland/xdg-shell-client-protocol.h"
-#include "wayland-client.h"
+#include "src/wayland/wayland.h"
 
 #define NNUL(_expr, DO)                                               \
   if(!(_expr))                                                        \
@@ -20,37 +16,6 @@
     printf("Negative: %s (%s:%d)\n", #_expr, __FILE__, __LINE__); \
     DO                                                            \
   }
-
-typedef struct dpyctx
-{
-  // handles
-  struct wl_display    *disp;
-  struct wl_registry   *reg;
-  struct wl_compositor *comp;
-  struct wl_surface    *surf;
-  struct xdg_wm_base   *shell;
-  struct xdg_surface   *xdgsrf;
-  struct xdg_toplevel  *toplvl;
-
-  // params
-  i32 w_max, h_max;    // compositor bounds, if any
-  i32 w_pref, h_pref;  // fallback for {0, 0} config event
-
-  // flags
-  u32 flags;
-  u32 err;
-
-  // fnc pointers
-  struct xdg_wm_base_listener  xdglstn;
-  struct wl_registry_listener  reglstn;
-  struct xdg_surface_listener  xdgsrflstn;
-  struct xdg_toplevel_listener toplvllstn;
-
-  // callbacks
-  resizefn_t rszcb;
-  closefn_t  clscb;
-  void      *usrdata;
-} wlctx;
 
 void toplvlcnf_h(
   void                *data,
@@ -127,6 +92,7 @@ void xdgping_h(void *data, struct xdg_wm_base *xdg_wm_base, uint32_t serial)
 
 void *dpygetnwin(wlctx *ctx) { return ctx->surf; }
 void *dpygetncon(wlctx *ctx) { return ctx->disp; }
+int   dpyinit_q(dpyctx *ctx) { return ctx && ctx->alive; }
 
 wlctx *dpyinit(const char *title, unsigned w, unsigned h, u32 flags)
 {
@@ -172,6 +138,7 @@ wlctx *dpyinit(const char *title, unsigned w, unsigned h, u32 flags)
   OK(res, goto fail;)
   wl_surface_commit(ctx->surf);
 
+  ctx->alive= 1;
   return ctx;
 fail:
   ctx->err= DPYERR_INIT;
@@ -189,6 +156,7 @@ void dpyterm(dpyctx *ctx)
   if(ctx->comp) wl_compositor_destroy(ctx->comp);
   if(ctx->reg) wl_registry_destroy(ctx->reg);
   if(ctx->disp) wl_display_disconnect(ctx->disp);
+  memset(ctx, 0, sizeof *ctx);
   free(ctx);
 }
 int dpypoll(dpyctx *ctx)

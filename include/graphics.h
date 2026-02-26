@@ -7,3 +7,5 @@ typedef struct gfxctx gfxctx;
 gfxctx *gfxinit(void *dpyctx);
 
 void gfxterm(gfxctx *);
+
+int gfxinit_q(gfxctx *);

@@ -1,130 +1,11 @@
-#define _GNU_SOURCE
+#include "src/vulkan/vulkan.h"
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_core.h>
-#include <vulkan/vulkan_wayland.h>
-
-#include "include/defs.h"
-#include "include/display.h"
-#include "include/graphics.h"
-
-#define OK(_expr, DO)                                             \
-  if((_expr) != 0)                                                \
-  {                                                               \
-    printf("Negative: %s (%s:%d)\n", #_expr, __FILE__, __LINE__); \
-    DO                                                            \
-  }
-#define NNUL(_expr, DO)                                               \
-  if(!(_expr))                                                        \
-  {                                                                   \
-    printf("Null pointer: %s (%s:%d)\n", #_expr, __FILE__, __LINE__); \
-    DO                                                                \
-  }
-
-#define SHADERS_MAX 16
-#define BUFFERS_MAX 64
-#define ARENAS_MAX 32
-
-#define VKNULL VK_NULL_HANDLE
 
 static const char *const VK_LAYER_VALID_NAME= "VK_LAYER_KHRONOS_validation";
 
-typedef struct vkfrmctx
-{
-  VkCommandBuffer cmdbuf;
-  VkSemaphore     renderfin, imggotten;
-  VkFence         fence;
-} frmctx;
-
-typedef struct
-{
-  VkDeviceMemory data;
-  usize          size;
-  usize          offset;
-  u32            typeidx;
-  u32            flags;
-
-  // diagnostic
-  u32 slop;
-} vkarena;
-
-typedef struct gfxctx
-{
-  // handles
-  VkInstance       inst;
-  VkSurfaceKHR     surf;
-  VkPhysicalDevice gpu;
-  VkDevice         dev;
-  VkQueue          gfxq;
-  VkQueue          prsq;
-
-  // swapchain stuff
-  VkSwapchainKHR swp;
-  u32            nrswpimgs;
-  VkImage        swpimgs[16];
-  VkImageView    swpimgvs[16];
-
-  // pipeline stuff
-  VkShaderModule   shaders[SHADERS_MAX];  // who needs more than 16 shaders
-  u32              nrshaders;
-  VkPipelineLayout layout;
-  VkPipeline       gfxppl;
-
-  // cmdpool stuff
-  VkCommandPool gfxcmdpool;
-  // may be VK_NULL_HANDLE, in which case
-  // gfxpool supports presentation
-  VkCommandPool prscmdpool;
-
-  // XXX keep these in contiguous memory and keep gfx first. see:
-  // swapchain creation
-  u32 gfxqfamidx;  // God queues
-  u32 prsqfamidx;
-
-  VkExtent2D swpextent;
-
-  // frames
-  frmctx frames[8];
-  u32    nrframes;
-
-  // memory
-  vkarena  arenas[32];
-  u32      nrarenas;
-  VkBuffer buffers[BUFFERS_MAX];
-
-  // info
-
-  // 1 if graphics and present queues indices are the same
-  u32                              gfxprs;
-  VkPhysicalDeviceFeatures2        gpufeats;
-  VkPhysicalDeviceVulkan11Features gpufeats11;
-  VkPhysicalDeviceVulkan12Features gpufeats12;
-  VkPhysicalDeviceVulkan13Features gpufeats13;
-  VkPhysicalDeviceVulkan14Features gpufeats14;
-
-  VkPhysicalDeviceProperties gpuprops;
-  const char               **layers;
-  u32                        nrlayers;
-  const char               **extensions;
-  u32                        nrextensions;
-  const char               **devextensions;
-  u32                        nrdevextensions;
-  VkQueueFamilyProperties    qfams[16];
-  u32                        nrqfams;
-  u32                        apiver;
-  VkSurfaceCapabilitiesKHR   gpuscaps;
-  VkSurfaceFormatKHR         gpusfmts[64];
-  u32                        nrgpusfmts;
-  VkPresentModeKHR           prsmodes[8];
-  u32                        nrprsmodes;
-  VkSurfaceFormatKHR         swpsfmt;
-} vkctx;
-
-static vkctx *init(void *dpy)
+vkctx *init(void *dpy)
 {
   vkctx *ctx= calloc(1, sizeof *ctx);
 
@@ -430,6 +311,7 @@ static vkctx *init(void *dpy)
       ctx->prscmdpool= VKNULL;
   }
 
+  ctx->alive= 1;
   return ctx;
 err:
   gfxterm(ctx);
@@ -437,7 +319,7 @@ err:
   return NULL;
 }
 
-static void frmterm(vkctx *ctx, u32 idx)
+void frmterm(vkctx *ctx, u32 idx)
 {
   if(idx >= ctx->nrframes) goto err;
 
@@ -451,7 +333,7 @@ err:
   return;
 }
 
-static void term(vkctx *ctx)
+void term(vkctx *ctx)
 {
   if(!ctx) return;
   vkDeviceWaitIdle(ctx->dev);
@@ -474,7 +356,7 @@ static void term(vkctx *ctx)
   free(ctx);
 }
 
-static int initgfxppl(vkctx *ctx, const u32 *shcode, u32 shlen)
+int initgfxppl(vkctx *ctx, const u32 *shcode, u32 shlen)
 {
   if(!ctx || !shcode) goto err;
   // shader
@@ -578,8 +460,9 @@ err:
 
 gfxctx *gfxinit(void *dpy) { return init(dpy); }
 void    gfxterm(gfxctx *ctx) { term(ctx); }
+int     gfxinit_q(gfxctx *ctx) { return ctx && ctx->alive; }
 
-static int frminit(vkctx *ctx)
+int frminit(vkctx *ctx)
 {
   if(!ctx) goto err;
 
@@ -616,7 +499,7 @@ err:
 }
 
 // caller must synchronise
-static int reinitswp(vkctx *ctx, i32 w_new, i32 h_new)
+int reinitswp(vkctx *ctx, i32 w_new, i32 h_new)
 {
   if(!ctx) goto err;
 
@@ -734,7 +617,7 @@ err:
   return -1;
 }
 
-static int render(vkctx *ctx)
+int render(vkctx *ctx)
 {
   static u32             absfrmidx= 0;
   static u32             frmidx   = 0;
@@ -761,8 +644,8 @@ static int render(vkctx *ctx)
       {
         double avg_ms = (double)acc_ns / acc_count / 1e6;
         double avg_fps= 1e9 / ((double)acc_ns / acc_count);
-        printf("frame=%-6u  ft=%-4.3fms  fps=%-8.1f\r",
-               absfrmidx, avg_ms, avg_fps);
+        printf(
+          "frame=%-6u  ft=%-4.3fms  fps=%-8.1f\r", absfrmidx, avg_ms, avg_fps);
         fflush(stdout);
         acc_ns   = 0;
         acc_count= 0;
@@ -897,7 +780,7 @@ err:
   return -1;
 }
 
-static vkarena *arenainit(
+vkarena *arenainit(
   vkctx *ctx, u32 idx, usize bytes, VkMemoryPropertyFlags flags)
 {
   if(!ctx || idx >= 32) goto err;
@@ -942,11 +825,11 @@ err:
   return NULL;
 }
 
-static usize alignup(usize addr, usize align)
+usize alignup(usize addr, usize align)
 {
   return (addr + align - 1) & ~(align - 1);
 }
-static i64 memalloc(vkarena *arena, usize bytes, usize align)
+i64 memalloc(vkarena *arena, usize bytes, usize align)
 {
   if(!arena) goto err;
 
@@ -969,21 +852,20 @@ err:
   return -1;
 }
 
-static void arenaclear(vkarena *arena)
+void arenaclear(vkarena *arena)
 {
   arena->offset= 0;
   arena->slop  = 0;
 }
-static void arenaterm(vkctx *ctx, vkarena *arena)
+void arenaterm(vkctx *ctx, vkarena *arena)
 {
   if(!arena || !ctx) return;
   if(arena->data) vkFreeMemory(ctx->dev, arena->data, NULL);
   memset(arena, 0, sizeof *arena);
 }
 
-static int      updata_staged();
-static VkBuffer updata_direct(
-  vkctx *ctx, vkarena *rbar, const void *data, usize bytes)
+static int updata_staged(void);
+VkBuffer updata_direct(vkctx *ctx, vkarena *rbar, const void *data, usize bytes)
 {
   VkMemoryPropertyFlags flags=
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
@@ -1040,12 +922,7 @@ void       handle_resize(i32 w, i32 h, void *ctx)
   reinitswp(vk, w, h);
 }
 
-#define MB (1024 * 1024)
-
-static void printarenainfo(
-  const vkctx *ctx, const vkarena *arena, const char *name);
-static void printmeminfo(const vkctx *ctx);
-
+#ifndef TESTING
 int main(int argc, char **argv)
 {
   int     rc = 0;
@@ -1115,8 +992,9 @@ exit:
   free(shader);
   return rc;
 }
+#endif  // TESTING
 
-static void printmeminfo(const vkctx *ctx)
+void printmeminfo(const vkctx *ctx)
 {
   VkPhysicalDeviceMemoryProperties props;
   vkGetPhysicalDeviceMemoryProperties(ctx->gpu, &props);
@@ -1152,8 +1030,7 @@ static void printmeminfo(const vkctx *ctx)
     putchar('\n');
   }
 }
-static void printarenainfo(
-  const vkctx *ctx, const vkarena *arena, const char *name)
+void printarenainfo(const vkctx *ctx, const vkarena *arena, const char *name)
 {
   VkPhysicalDeviceMemoryProperties props;
   vkGetPhysicalDeviceMemoryProperties(ctx->gpu, &props);

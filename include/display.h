@@ -29,3 +29,5 @@ typedef void (*closefn_t)(void *);
 void dpysetusrdata(dpyctx *, void *);
 void dpysetrszcb(dpyctx *, resizefn_t);
 void dpysetclscb(dpyctx *, closefn_t);
+
+int dpyinit_q(dpyctx *);
