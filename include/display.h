@@ -4,14 +4,14 @@
 
 typedef enum
 {
-	DPYERR_INIT
-} DPYERR;;
+  DPYERR_INIT
+} DPYERR;
+
 typedef struct dpyctx dpyctx;
 
-dpyctx *dpyinit(
-  const char *title, unsigned width, unsigned height, u32 flags);
+dpyctx *dpyinit(const char *title, unsigned width, unsigned height, u32 flags);
 
-int dpygeterr(dpyctx *ctx);
+int         dpygeterr(dpyctx *);
 const char *dpyerrstr(DPYERR);
 
 // get native window handle
@@ -19,7 +19,13 @@ void *dpygetnwin(dpyctx *);
 // get native instance handle
 void *dpygetncon(dpyctx *);
 
-int dpypoll(dpyctx *ctx);
+int dpypoll(dpyctx *);
 
-void dpyterm(dpyctx *ctx);
+void dpyterm(dpyctx *);
 
+typedef void (*resizefn_t)(i32, i32, void *);
+typedef void (*closefn_t)(void *);
+
+void dpysetusrdata(dpyctx *, void *);
+void dpysetrszcb(dpyctx *, resizefn_t);
+void dpysetclscb(dpyctx *, closefn_t);

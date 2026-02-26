@@ -264,7 +264,7 @@ typedef union t4i32
 {
   struct
   {
-    i32 x, y, z;
+    i32 x, y, z, w;
   };
 } t4i32;
 
@@ -318,7 +318,7 @@ typedef union t4i64
 {
   struct
   {
-    i64 x, y, z;
+    i64 x, y, z, w;
   };
 } t4i64;
 

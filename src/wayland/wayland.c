@@ -21,13 +21,6 @@
     DO                                                            \
   }
 
-enum WLCTX_FLAGBITS
-{
-  WLCTX_RESIZE = 0x1 << 0,
-  WLCTX_CLOSE  = 0x1 << 1,
-  WLCTX_BOUNDS = 0x1 << 2,
-  WLCTX_LOOPING= 0x1 << 3
-};
 typedef struct dpyctx
 {
   // handles
@@ -40,10 +33,8 @@ typedef struct dpyctx
   struct xdg_toplevel  *toplvl;
 
   // params
-  i32 w, h;
-  i32 w_max, h_max;
-  i32 w_new, h_new;
-  i32 w_pref, h_pref;
+  i32 w_max, h_max;    // compositor bounds, if any
+  i32 w_pref, h_pref;  // fallback for {0, 0} config event
 
   // flags
   u32 flags;
@@ -54,9 +45,85 @@ typedef struct dpyctx
   struct wl_registry_listener  reglstn;
   struct xdg_surface_listener  xdgsrflstn;
   struct xdg_toplevel_listener toplvllstn;
+
+  // callbacks
+  resizefn_t rszcb;
+  closefn_t  clscb;
+  void      *usrdata;
 } wlctx;
 
-#include "src/wayland/handlers.inl"
+void toplvlcnf_h(
+  void                *data,
+  struct xdg_toplevel *xdg_toplevel,
+  int32_t              width,
+  int32_t              height,
+  struct wl_array     *states)
+{
+  NNUL(data, return;);
+  wlctx *ctx= (wlctx *)data;
+
+  i32 w_new, h_new;
+  if(width && height)
+    w_new= width, h_new= height;
+  else
+    w_new= ctx->w_pref, h_new= ctx->h_pref;
+
+  if(ctx->rszcb) ctx->rszcb(w_new, h_new, ctx->usrdata);
+}
+void toplvlclose_h(void *data, struct xdg_toplevel *xdg_toplevel)
+{
+  NNUL(data, return;);
+  wlctx *ctx= (wlctx *)data;
+
+  if(ctx->clscb) ctx->clscb(ctx->usrdata);
+}
+void toplvlbounds_h(
+  void *data, struct xdg_toplevel *xdg_toplevel, int32_t width, int32_t height)
+{
+  NNUL(data, return;);
+  wlctx *ctx= (wlctx *)data;
+
+  if(width && height) ctx->w_max= width, ctx->h_max= height;
+}
+void toplvlcpb_h(
+  void *data, struct xdg_toplevel *xdg_toplevel, struct wl_array *capabilities)
+{
+  // no-op
+}
+
+void xdgsrf_h(void *data, struct xdg_surface *xdg_surface, uint32_t serial)
+{
+  xdg_surface_ack_configure(xdg_surface, serial);
+}
+void regobj_h(
+  void               *data,
+  struct wl_registry *wl_registry,
+  uint32_t            name,
+  const char         *interface,
+  uint32_t            version)
+{
+  NNUL(data, return;);
+
+  wlctx *ctx= (wlctx *)(data);
+  if(strcmp(interface, wl_compositor_interface.name) == 0)
+    ctx->comp=
+      wl_registry_bind(wl_registry, name, &wl_compositor_interface, version);
+  else if(strcmp(interface, xdg_wm_base_interface.name) == 0)
+  {
+    ctx->shell=
+      wl_registry_bind(wl_registry, name, &xdg_wm_base_interface, version);
+    xdg_wm_base_add_listener(ctx->shell, &ctx->xdglstn, ctx);
+  }
+}
+// handle object removal
+void regobjr_h(void *data, struct wl_registry *wl_registry, uint32_t name)
+{
+  // no-op
+}
+void xdgping_h(void *data, struct xdg_wm_base *xdg_wm_base, uint32_t serial)
+{
+  xdg_wm_base_pong(xdg_wm_base, serial);
+}
 
 void *dpygetnwin(wlctx *ctx) { return ctx->surf; }
 void *dpygetncon(wlctx *ctx) { return ctx->disp; }
@@ -126,10 +193,14 @@ void dpyterm(dpyctx *ctx)
 }
 int dpypoll(dpyctx *ctx)
 {
-  if (wl_display_flush(ctx->disp) < 0) return -1;
-  if (wl_display_roundtrip(ctx->disp) < 0) return -1;
-	if (ctx->flags & WLCTX_CLOSE) return -1;
+  if(wl_display_flush(ctx->disp) < 0) return -1;
+  if(wl_display_roundtrip(ctx->disp) < 0) return -1;
   return 0;
 }
+
+void dpysetusrdata(dpyctx *ctx, void *usr) { ctx->usrdata= usr; }
+void dpysetrszcb(dpyctx *ctx, resizefn_t cb) { ctx->rszcb= cb; }
+void dpysetclscb(dpyctx *ctx, closefn_t cb) { ctx->clscb= cb; }
+
 #undef OK
 #undef NNUL

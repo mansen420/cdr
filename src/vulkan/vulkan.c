@@ -9,7 +9,7 @@
 #include "include/graphics.h"
 
 #define OK(_expr, DO)                                             \
-  if((_expr) < 0)                                                 \
+  if((_expr) != 0)                                                \
   {                                                               \
     printf("Negative: %s (%s:%d)\n", #_expr, __FILE__, __LINE__); \
     DO                                                            \
@@ -403,7 +403,7 @@ static vkctx *init(void *dpy)
 
   return ctx;
 err:
-	gfxterm(ctx);
+  gfxterm(ctx);
   puts("VK init erred");
   return NULL;
 }
@@ -441,11 +441,11 @@ static void term(vkctx *ctx)
   if(ctx->surf) vkDestroySurfaceKHR(ctx->inst, ctx->surf, NULL);
   if(ctx->inst) vkDestroyInstance(ctx->inst, NULL);
 
-	memset(ctx, 0, sizeof *ctx);
+  memset(ctx, 0, sizeof *ctx);
   free(ctx);
 }
 
-static int mkgfxppl(vkctx *ctx, const u32 *shcode, u32 shlen)
+static int initgfxppl(vkctx *ctx, const u32 *shcode, u32 shlen)
 {
   if(!ctx || !shcode) goto err;
   // shader
@@ -586,21 +586,146 @@ err:
   return -1;
 }
 
+// caller must synchronise
+static int reinitswp(vkctx *ctx, i32 w_new, i32 h_new)
+{
+  if(!ctx) goto err;
+
+  for(unsigned i= 0; i < ctx->nrswpimgs; i++)
+    vkDestroyImageView(ctx->dev, ctx->swpimgvs[i], NULL);
+  memset(&ctx->swpimgvs, 0, sizeof ctx->swpimgvs);
+
+  // swapchain
+  {
+    VkResult res= vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+      ctx->gpu, ctx->surf, &ctx->gpuscaps);
+    OK(res, goto err;)
+
+    res= vkGetPhysicalDeviceSurfaceFormatsKHR(
+      ctx->gpu, ctx->surf, &ctx->nrgpusfmts, NULL);
+    OK(res, goto err;)
+    res= vkGetPhysicalDeviceSurfaceFormatsKHR(
+      ctx->gpu, ctx->surf, &ctx->nrgpusfmts, ctx->gpusfmts);
+    OK(res, goto err;)
+
+    res= vkGetPhysicalDeviceSurfacePresentModesKHR(
+      ctx->gpu, ctx->surf, &ctx->nrprsmodes, NULL);
+    OK(res, goto err;)
+    if(ctx->nrprsmodes > 8) ctx->nrprsmodes= 8;
+    res= vkGetPhysicalDeviceSurfacePresentModesKHR(
+      ctx->gpu, ctx->surf, &ctx->nrprsmodes, ctx->prsmodes);
+    OK(res, goto err;)
+
+    const VkSurfaceFormatKHR *chosen= &ctx->gpusfmts[0];
+    for(unsigned i= 0; i < ctx->nrgpusfmts; i++)
+      if(
+        ctx->gpusfmts[i].format == VK_FORMAT_B8G8R8A8_SRGB &&
+        ctx->gpusfmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+      {
+        chosen= &ctx->gpusfmts[i];
+        break;
+      }
+
+    // TODO replace (800, 600) with paramterized defaults
+    VkExtent2D extent;
+    if(
+      ctx->gpuscaps.currentExtent.width == UINT32_MAX &&
+      ctx->gpuscaps.currentExtent.height == UINT32_MAX)
+    {
+      extent.width= w_new > ctx->gpuscaps.maxImageExtent.width
+                      ? ctx->gpuscaps.maxImageExtent.width
+                      : w_new;
+
+      extent.height= h_new > ctx->gpuscaps.maxImageExtent.height
+                       ? ctx->gpuscaps.maxImageExtent.height
+                       : h_new;
+    }
+    else
+      extent= ctx->gpuscaps.currentExtent;
+
+    const VkPresentModeKHR *mode= NULL;
+    for(unsigned i= 0; i < ctx->nrprsmodes; i++)
+    {
+      if(ctx->prsmodes[i] == VK_PRESENT_MODE_MAILBOX_KHR)
+        mode= &ctx->prsmodes[i];
+    }
+    if(!mode) mode= &ctx->prsmodes[0];
+
+    VkSwapchainCreateInfoKHR info= {
+      .sType           = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+      .surface         = ctx->surf,
+      .minImageCount   = ctx->gpuscaps.minImageCount + 1,  // XXX may break
+      .imageFormat     = chosen->format,
+      .imageColorSpace = chosen->colorSpace,
+      .imageExtent     = extent,
+      .imageArrayLayers= 1,
+      .imageUsage      = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+      .imageSharingMode=
+        ctx->gfxprs ? VK_SHARING_MODE_EXCLUSIVE : VK_SHARING_MODE_CONCURRENT,
+      .queueFamilyIndexCount= ctx->gfxprs ? 0 : 2,
+      .pQueueFamilyIndices  = ctx->gfxprs ? NULL : &ctx->gfxqfamidx,
+      .preTransform         = ctx->gpuscaps.currentTransform,
+      .compositeAlpha       = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+      .presentMode          = *mode,
+      .clipped              = VK_TRUE,
+      .oldSwapchain         = ctx->swp};
+
+    VkSwapchainKHR temp;
+    res= vkCreateSwapchainKHR(ctx->dev, &info, NULL, &temp);
+    OK(res, goto err;)
+    vkDestroySwapchainKHR(ctx->dev, ctx->swp, NULL);
+    ctx->swp      = temp;
+    ctx->swpsfmt  = *chosen;
+    ctx->swpextent= extent;
+  }
+
+  // img views
+  {
+    VkResult res=
+      vkGetSwapchainImagesKHR(ctx->dev, ctx->swp, &ctx->nrswpimgs, NULL);
+    OK(res, goto err;)
+    res= vkGetSwapchainImagesKHR(
+      ctx->dev, ctx->swp, &ctx->nrswpimgs, ctx->swpimgs);
+    OK(res, goto err;)
+
+    for(unsigned i= 0; i < ctx->nrswpimgs; i++)
+    {
+      VkImageViewCreateInfo info= {
+        .sType           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image           = ctx->swpimgs[i],
+        .viewType        = VK_IMAGE_VIEW_TYPE_2D,
+        .format          = ctx->swpsfmt.format,
+        .subresourceRange= {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+      res= vkCreateImageView(ctx->dev, &info, NULL, &ctx->swpimgvs[i]);
+      OK(res, goto err;)
+    }
+  }
+  return 0;
+err:
+  return -1;
+}
+
 static int render(vkctx *ctx)
 {
-  static u32 frmidx= 0;
-  frmctx    *frm   = &ctx->frames[frmidx];
+  static u32 absfrmidx= 0;
+  static u32 frmidx   = 0;
+  VkResult   res      = VK_SUCCESS;
+
+  frmctx *frm= &ctx->frames[frmidx];
 
   vkWaitForFences(ctx->dev, 1, &frm->fence, VK_TRUE, UINT64_MAX);
-  vkResetFences(ctx->dev, 1, &frm->fence);
+
+  // if this stalls there may be a deadlock
+  printf("Frame: %d\r", absfrmidx);
 
   VkSemaphore acqsem= frm->imggotten;
   u32         imgidx;
-  VkResult    res= vkAcquireNextImageKHR(
+  res= vkAcquireNextImageKHR(
     ctx->dev, ctx->swp, UINT64_MAX, acqsem, VKNULL, &imgidx);
   OK(res, goto err;)
 
   VkSemaphore subsem= ctx->frames[imgidx].renderfin;
+
   // submit work
   {
     // record cmds
@@ -693,6 +818,8 @@ static int render(vkctx *ctx)
       .pSignalSemaphoreInfos   = &siginfo,
       .commandBufferInfoCount  = 1,
       .pCommandBufferInfos     = &cmdinfo};
+
+    vkResetFences(ctx->dev, 1, &frm->fence);  // unsignal the fence
     res= vkQueueSubmit2(ctx->gfxq, 1, &subinfo, frm->fence);
     OK(res, goto err;)
   }
@@ -705,13 +832,15 @@ static int render(vkctx *ctx)
       .swapchainCount    = 1,
       .pSwapchains       = &ctx->swp,
       .pImageIndices     = &imgidx};
-    vkQueuePresentKHR(ctx->prsq, &presinfo);
+    res= vkQueuePresentKHR(ctx->prsq, &presinfo);
+    OK(res, goto err;)
   }
 
   frmidx= (frmidx + 1) % ctx->nrframes;
+  absfrmidx++;
   return 0;
 err:
-  puts("Failure during frame rendering");
+  if(res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) return 1;
   return -1;
 }
 
@@ -719,11 +848,27 @@ err:
 #include <sys/stat.h>
 #include <unistd.h>
 
+static int quit= 0;
+void       handle_close(void *) { quit= 1; }
+void       handle_resize(i32 w, i32 h, void *ctx)
+{
+  if(!ctx) return;
+  vkctx *vk= ctx;
+
+  vkDeviceWaitIdle(vk->dev);
+
+  reinitswp(vk, w, h);
+}
+
 int main(int argc, char **argv)
 {
   int     rc = 0;
   dpyctx *dpy= dpyinit("title", 800, 600, 0);
   vkctx  *ctx= gfxinit(dpy);
+
+  dpysetclscb(dpy, handle_close);
+  dpysetrszcb(dpy, handle_resize);
+  dpysetusrdata(dpy, ctx);
 
   u32 *shader= NULL;
   u32  nbytes= 0;
@@ -744,11 +889,18 @@ int main(int argc, char **argv)
     if(rdb != nbytes) puts("IO warning");
     close(fd);
   }
-  rc= mkgfxppl(ctx, shader, nbytes);
+  rc= initgfxppl(ctx, shader, nbytes);
   rc= frminit(ctx);
   OK(rc, goto exit;)
 
-  while(dpypoll(dpy) == 0) render(ctx);
+  while(dpypoll(dpy) == 0 && !quit)
+  {
+    int renderc= render(ctx);
+    if(renderc < 0)
+      break;
+    else if(renderc == 1)
+      puts("RESIZE");
+  }
 
   vkDeviceWaitIdle(ctx->dev);
 exit:
