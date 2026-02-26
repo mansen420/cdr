@@ -1,6 +1,9 @@
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_wayland.h>
@@ -733,16 +736,40 @@ err:
 
 static int render(vkctx *ctx)
 {
-  static u32 absfrmidx= 0;
-  static u32 frmidx   = 0;
-  VkResult   res      = VK_SUCCESS;
+  static u32             absfrmidx= 0;
+  static u32             frmidx   = 0;
+  static struct timespec t_last   = {0};
+  static u64             acc_ns   = 0;
+  static u32             acc_count= 0;
+  VkResult               res      = VK_SUCCESS;
 
   frmctx *frm= &ctx->frames[frmidx];
 
   vkWaitForFences(ctx->dev, 1, &frm->fence, VK_TRUE, UINT64_MAX);
 
-  // if this stalls there may be a deadlock
-  printf("Frame: %d\r", absfrmidx);
+#define PRINT_INTERVAL_NS (1000000000ULL / 15)
+  {
+    struct timespec t_now;
+    clock_gettime(CLOCK_MONOTONIC, &t_now);
+    if(t_last.tv_sec || t_last.tv_nsec)
+    {
+      u64 delta_ns= (u64)(t_now.tv_sec - t_last.tv_sec) * 1000000000ULL +
+                    (u64)(t_now.tv_nsec - t_last.tv_nsec);
+      acc_ns+= delta_ns;
+      acc_count++;
+      if(acc_ns >= PRINT_INTERVAL_NS)
+      {
+        double avg_ms = (double)acc_ns / acc_count / 1e6;
+        double avg_fps= 1e9 / ((double)acc_ns / acc_count);
+        printf("frame=%-6u  ft=%-4.3fms  fps=%-8.1f\r",
+               absfrmidx, avg_ms, avg_fps);
+        fflush(stdout);
+        acc_ns   = 0;
+        acc_count= 0;
+      }
+    }
+    t_last= t_now;
+  }
 
   VkSemaphore acqsem= frm->imggotten;
   u32         imgidx;
@@ -1043,6 +1070,7 @@ int main(int argc, char **argv)
   }
 
   dpysetrszcb(dpy, handle_resize);
+  dpysetclscb(dpy, handle_close);
   dpysetusrdata(dpy, ctx);
 
   u32 *shader= NULL;
@@ -1079,6 +1107,9 @@ int main(int argc, char **argv)
 
   vkDeviceWaitIdle(ctx->dev);
 exit:
+  arenaterm(ctx, mem_rbar);
+  arenaterm(ctx, mem_dev);
+  arenaterm(ctx, mem_host);
   gfxterm(ctx);
   dpyterm(dpy);
   free(shader);
