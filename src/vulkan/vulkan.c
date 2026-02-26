@@ -5,6 +5,7 @@
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_wayland.h>
 
+#include "include/defs.h"
 #include "include/display.h"
 #include "include/graphics.h"
 
@@ -14,8 +15,16 @@
     printf("Negative: %s (%s:%d)\n", #_expr, __FILE__, __LINE__); \
     DO                                                            \
   }
+#define NNUL(_expr, DO)                                               \
+  if(!(_expr))                                                        \
+  {                                                                   \
+    printf("Null pointer: %s (%s:%d)\n", #_expr, __FILE__, __LINE__); \
+    DO                                                                \
+  }
 
-#define MAX_SHADERS 16
+#define SHADERS_MAX 16
+#define BUFFERS_MAX 64
+#define ARENAS_MAX 32
 
 #define VKNULL VK_NULL_HANDLE
 
@@ -27,6 +36,18 @@ typedef struct vkfrmctx
   VkSemaphore     renderfin, imggotten;
   VkFence         fence;
 } frmctx;
+
+typedef struct
+{
+  VkDeviceMemory data;
+  usize          size;
+  usize          offset;
+  u32            typeidx;
+  u32            flags;
+
+  // diagnostic
+  u32 slop;
+} vkarena;
 
 typedef struct gfxctx
 {
@@ -45,7 +66,7 @@ typedef struct gfxctx
   VkImageView    swpimgvs[16];
 
   // pipeline stuff
-  VkShaderModule   shaders[MAX_SHADERS];  // who needs more than 16 shaders
+  VkShaderModule   shaders[SHADERS_MAX];  // who needs more than 16 shaders
   u32              nrshaders;
   VkPipelineLayout layout;
   VkPipeline       gfxppl;
@@ -66,6 +87,11 @@ typedef struct gfxctx
   // frames
   frmctx frames[8];
   u32    nrframes;
+
+  // memory
+  vkarena  arenas[32];
+  u32      nrarenas;
+  VkBuffer buffers[BUFFERS_MAX];
 
   // info
 
@@ -454,7 +480,7 @@ static int initgfxppl(vkctx *ctx, const u32 *shcode, u32 shlen)
       .sType   = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
       .codeSize= shlen,
       .pCode   = shcode};
-    if(ctx->nrshaders >= MAX_SHADERS) goto err;
+    if(ctx->nrshaders >= SHADERS_MAX) goto err;
 
     VkResult res= vkCreateShaderModule(
       ctx->dev, &info, NULL, &ctx->shaders[ctx->nrshaders++]);
@@ -844,6 +870,133 @@ err:
   return -1;
 }
 
+static vkarena *arenainit(
+  vkctx *ctx, u32 idx, usize bytes, VkMemoryPropertyFlags flags)
+{
+  if(!ctx || idx >= 32) goto err;
+
+  vkarena *mem= &ctx->arenas[idx];
+
+  memset(mem, 0, sizeof *mem);
+
+  VkPhysicalDeviceMemoryProperties memprops;
+  vkGetPhysicalDeviceMemoryProperties(ctx->gpu, &memprops);
+
+  // find memory
+  int typeidx= -1;
+  {
+    for(unsigned i= 0; i < memprops.memoryTypeCount; i++)
+      if((memprops.memoryTypes[i].propertyFlags & flags) == flags)
+      {
+        typeidx= i;
+        flags  = memprops.memoryTypes[i].propertyFlags;
+        break;
+      }
+  }
+  if(typeidx == -1) goto err;
+
+  VkMemoryAllocateInfo allocinfo= {
+    .sType          = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+    .allocationSize = bytes,
+    .memoryTypeIndex= typeidx};
+
+  VkDeviceMemory handle= VKNULL;
+  VkResult       res   = vkAllocateMemory(ctx->dev, &allocinfo, NULL, &handle);
+  OK(res, goto err;)
+
+  mem->data   = handle;
+  mem->size   = bytes;
+  mem->typeidx= typeidx;
+  mem->offset = 0;
+  mem->flags  = flags;
+
+  return mem;
+err:
+  return NULL;
+}
+
+static usize alignup(usize addr, usize align)
+{
+  return (addr + align - 1) & ~(align - 1);
+}
+static i64 memalloc(vkarena *arena, usize bytes, usize align)
+{
+  if(!arena) goto err;
+
+  usize aligned      = alignup(arena->offset, align);
+  usize alignoverhead= aligned - arena->offset;
+  // coulda just checked on aligned >= size, but whatever
+  if(alignoverhead >= arena->size - arena->offset) goto err;
+
+  // fragmentation occurs here, would be a good place to log
+  arena->slop+= alignoverhead;
+
+  usize free= arena->size - aligned;
+  if(bytes > free) goto err;
+
+  i64 res= (i64)aligned;
+  arena->offset+= alignoverhead + bytes;
+
+  return res;
+err:
+  return -1;
+}
+
+static void arenaclear(vkarena *arena)
+{
+  arena->offset= 0;
+  arena->slop  = 0;
+}
+static void arenaterm(vkctx *ctx, vkarena *arena)
+{
+  if(!arena || !ctx) return;
+  if(arena->data) vkFreeMemory(ctx->dev, arena->data, NULL);
+  memset(arena, 0, sizeof *arena);
+}
+
+static int      updata_staged();
+static VkBuffer updata_direct(
+  vkctx *ctx, vkarena *rbar, const void *data, usize bytes)
+{
+  VkMemoryPropertyFlags flags=
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+
+  VkBuffer buf= VKNULL;
+  VkResult res;
+
+  if(!ctx || !data || (rbar->flags & flags) != flags) goto err;
+
+  VkBufferCreateInfo info= {
+    .sType      = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+    .usage      = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+    .size       = bytes,
+    .sharingMode= VK_SHARING_MODE_EXCLUSIVE};
+  res= vkCreateBuffer(ctx->dev, &info, NULL, &buf);
+  OK(res, goto err;)
+
+  VkMemoryRequirements reqs;
+  vkGetBufferMemoryRequirements(ctx->dev, buf, &reqs);
+
+  if(!(((u32)1 << rbar->typeidx) & reqs.memoryTypeBits)) goto err;
+
+  i64 offset= memalloc(rbar, reqs.size, reqs.alignment);
+  if(offset < 0) goto err;
+
+  res= vkBindBufferMemory(ctx->dev, buf, rbar->data, offset);
+  OK(res, goto err;)
+
+  void *mapped;
+  res= vkMapMemory(ctx->dev, rbar->data, offset, reqs.size, 0, &mapped);
+  OK(res, goto err;)
+  memcpy(mapped, data, bytes);
+  vkUnmapMemory(ctx->dev, rbar->data);
+
+  return buf;
+err:
+  if(buf) vkDestroyBuffer(ctx->dev, buf, NULL);
+  return VKNULL;
+}
+
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -860,13 +1013,35 @@ void       handle_resize(i32 w, i32 h, void *ctx)
   reinitswp(vk, w, h);
 }
 
+#define MB (1024 * 1024)
+
+static void printarenainfo(
+  const vkctx *ctx, const vkarena *arena, const char *name);
+static void printmeminfo(const vkctx *ctx);
+
 int main(int argc, char **argv)
 {
   int     rc = 0;
   dpyctx *dpy= dpyinit("title", 800, 600, 0);
   vkctx  *ctx= gfxinit(dpy);
 
-  dpysetclscb(dpy, handle_close);
+  vkarena *mem_host= NULL, *mem_dev= NULL,
+          *mem_rbar= arenainit(
+            ctx,
+            0,
+            10 * MB,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if(!mem_rbar)  // staging
+  {
+    mem_host= arenainit(ctx, 0, 2 * MB, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    NNUL(mem_host, goto exit;)
+
+    mem_dev= arenainit(ctx, 1, 10 * MB, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    NNUL(mem_dev, goto exit;)
+  }
+
   dpysetrszcb(dpy, handle_resize);
   dpysetusrdata(dpy, ctx);
 
@@ -908,4 +1083,71 @@ exit:
   dpyterm(dpy);
   free(shader);
   return rc;
+}
+
+static void printmeminfo(const vkctx *ctx)
+{
+  VkPhysicalDeviceMemoryProperties props;
+  vkGetPhysicalDeviceMemoryProperties(ctx->gpu, &props);
+
+  puts("=== memory heaps ===");
+  for(u32 i= 0; i < props.memoryHeapCount; i++)
+  {
+    VkMemoryHeap h= props.memoryHeaps[i];
+    printf(
+      "  heap[%u]  size=%.0f MiB  flags=%s\n",
+      i,
+      (double)h.size / (1024.0 * 1024.0),
+      h.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ? "DEVICE_LOCAL" : "(none)");
+  }
+
+  puts("=== memory types ===");
+  for(u32 i= 0; i < props.memoryTypeCount; i++)
+  {
+    VkMemoryType          t= props.memoryTypes[i];
+    VkMemoryPropertyFlags f= t.propertyFlags;
+    printf("  type[%u]  heap=%u  flags=", i, t.heapIndex);
+    if(!f)
+    {
+      puts("(none)");
+      continue;
+    }
+    if(f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) printf("DEVICE_LOCAL ");
+    if(f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) printf("HOST_VISIBLE ");
+    if(f & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) printf("HOST_COHERENT ");
+    if(f & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) printf("HOST_CACHED ");
+    if(f & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT) printf("LAZILY_ALLOCATED ");
+    if(f & VK_MEMORY_PROPERTY_PROTECTED_BIT) printf("PROTECTED ");
+    putchar('\n');
+  }
+}
+static void printarenainfo(
+  const vkctx *ctx, const vkarena *arena, const char *name)
+{
+  VkPhysicalDeviceMemoryProperties props;
+  vkGetPhysicalDeviceMemoryProperties(ctx->gpu, &props);
+
+  VkMemoryType t      = props.memoryTypes[arena->typeidx];
+  VkMemoryHeap heap   = props.memoryHeaps[t.heapIndex];
+  double       heapmib= (double)heap.size / (1024.0 * 1024.0);
+  double       sizemib= (double)arena->size / (1024.0 * 1024.0);
+
+  printf("=== arena: %s ===\n", name ? name : "?");
+  printf("  size     = %.2f MiB\n", sizemib);
+  printf("  used     = %zu B  slop=%zu B\n", arena->offset, arena->slop);
+  printf("  typeidx  = %u\n", arena->typeidx);
+  printf(
+    "  heap     = %u  (%.0f MiB%s)\n",
+    t.heapIndex,
+    heapmib,
+    heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ? ", DEVICE_LOCAL" : "");
+  printf("  flags    =");
+  VkMemoryPropertyFlags f= arena->flags;
+  if(f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) printf(" DEVICE_LOCAL");
+  if(f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) printf(" HOST_VISIBLE");
+  if(f & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) printf(" HOST_COHERENT");
+  if(f & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) printf(" HOST_CACHED");
+  if(f & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT) printf(" LAZILY_ALLOCATED");
+  if(f & VK_MEMORY_PROPERTY_PROTECTED_BIT) printf(" PROTECTED");
+  putchar('\n');
 }
