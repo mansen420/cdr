@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-
-test -d ./src || { echo "Run this script from project root";
-    exit 1; }
-
-rm -rf build

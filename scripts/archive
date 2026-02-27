@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-
-shopt -s globstar nullglob
-
-mkdir -p "build/libs"
-ar rcs "build/libs/libcdr.a" build/obj/**/*.o 
