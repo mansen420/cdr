@@ -156,7 +156,7 @@ typedef union t4i8
 {
   struct
   {
-    i8 x, y, z;
+    i8 x, y, z, w;
   };
 } t4i8;
 
@@ -210,7 +210,7 @@ typedef union t4i16
 {
   struct
   {
-    i16 x, y, z;
+    i16 x, y, z, w;
   };
 } t4i16;
 
