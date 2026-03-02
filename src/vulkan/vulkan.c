@@ -346,6 +346,7 @@ void term(vkctx *ctx)
   if(!ctx) return;
   vkDeviceWaitIdle(ctx->dev);
 
+  if(ctx->vtxbuf) vkDestroyBuffer(ctx->dev, ctx->vtxbuf, NULL);
   for(unsigned i= 0; i < ctx->nrframes; i++) frmterm(ctx, i);
   if(ctx->prscmdpool) vkDestroyCommandPool(ctx->dev, ctx->prscmdpool, NULL);
   if(ctx->gfxcmdpool) vkDestroyCommandPool(ctx->dev, ctx->gfxcmdpool, NULL);
@@ -394,8 +395,28 @@ int initgfxppl(vkctx *ctx, const u32 *shcode, u32 shlen)
     .module= module,
     .pName = "fragMain"};
 
+  VkVertexInputBindingDescription bind= {
+    .binding  = 0,
+    .stride   = sizeof(vertex),
+    .inputRate= VK_VERTEX_INPUT_RATE_VERTEX};
+  VkVertexInputAttributeDescription attrs[2];
+  attrs[0]=
+    (VkVertexInputAttributeDescription){.location= 0,
+                                        .binding = 0,
+                                        .format  = VK_FORMAT_R32G32_SFLOAT,
+                                        offsetof(vertex, pos)};
+  attrs[1]=
+    (VkVertexInputAttributeDescription){.location= 1,
+                                        .binding = 0,
+                                        .format  = VK_FORMAT_R32G32B32_SFLOAT,
+                                        offsetof(vertex, color)};
+
   VkPipelineVertexInputStateCreateInfo inputinfo= {
-    .sType= VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    .sType= VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    .vertexBindingDescriptionCount  = 1,
+    .pVertexBindingDescriptions     = &bind,
+    .vertexAttributeDescriptionCount= 2,
+    .pVertexAttributeDescriptions   = attrs};
 
   VkPipelineInputAssemblyStateCreateInfo asminfo= {
     .sType   = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -627,20 +648,21 @@ err:
 
 int render(vkctx *ctx)
 {
-  static u32             absfrmidx= 0;
-  static u32             frmidx   = 0;
-  static struct timespec t_last   = {0};
-  static u64             acc_ns   = 0;
-  static u32             acc_count= 0;
-  VkResult               res      = VK_SUCCESS;
+  static u32 absfrmidx= 0;
+  static u32 frmidx   = 0;
+  VkResult   res      = VK_SUCCESS;
 
   frmctx *frm= &ctx->frames[frmidx];
 
   vkWaitForFences(ctx->dev, 1, &frm->fence, VK_TRUE, UINT64_MAX);
 
-#define PRINT_INTERVAL_NS (1000000000ULL / 15)
+  // print diagnostics
   {
-    struct timespec t_now;
+    static struct timespec t_last           = {0};
+    static u64             acc_ns           = 0;
+    static u32             acc_count        = 0;
+    static const u64       PRINT_INTERVAL_NS= (1000000000ULL / 15);
+    struct timespec        t_now;
     clock_gettime(CLOCK_MONOTONIC, &t_now);
     if(t_last.tv_sec || t_last.tv_nsec)
     {
@@ -674,6 +696,8 @@ int render(vkctx *ctx)
   {
     // record cmds
     {
+      NNUL(ctx->vtxbuf, goto err;)
+
       vkResetCommandBuffer(frm->cmdbuf, 0);
       VkCommandBufferBeginInfo binfo= {
         .sType= VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -720,6 +744,8 @@ int render(vkctx *ctx)
       VkRect2D scissor= {.extent= ctx->swpextent};
       vkCmdSetScissor(frm->cmdbuf, 0, 1, &scissor);
 
+      VkDeviceSize vtxoff= 0;
+      vkCmdBindVertexBuffers(frm->cmdbuf, 0, 1, &ctx->vtxbuf, &vtxoff);
       vkCmdDraw(frm->cmdbuf, 3, 1, 0, 0);
 
       vkCmdEndRendering(frm->cmdbuf);
@@ -1045,7 +1071,7 @@ void       handle_resize(i32 w, i32 h, void *ctx)
 #ifndef TESTING
 int main(int argc, char **argv)
 {
-  int     rc = 0;
+  int  rc    = 0;
   u32 *shader= NULL;
 
   dpyctx *dpy= dpyinit("title", 800, 600, 0);
@@ -1068,11 +1094,22 @@ int main(int argc, char **argv)
     NNUL(mem_dev, goto exit;)
   }
 
+  vertex triangle[3]= {
+    {.pos= {.x= 0.0f, .y= -0.5f}, .color= {.r= 1.f, .g= 0.f, .b= 0.f}},
+    {.pos= {.x= 0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 1.f, .b= 0.f}},
+    {.pos= {.x= -0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 0.f, .b= 1.f}}};
+	
+  if(mem_rbar)
+    ctx->vtxbuf= updata_direct(ctx, mem_rbar, triangle, sizeof triangle);
+  else
+    ctx->vtxbuf= updata_staged(ctx, mem_host, mem_dev, triangle, sizeof triangle);
+  NNUL(ctx->vtxbuf, goto exit;)
+
   dpysetrszcb(dpy, handle_resize);
   dpysetclscb(dpy, handle_close);
   dpysetusrdata(dpy, ctx);
 
-  u32  nbytes= 0;
+  u32 nbytes= 0;
   {
     const char *path= argc > 1 ? argv[1] : "./assets/shader.spv";
 
@@ -1136,7 +1173,7 @@ void printmeminfo(const vkctx *ctx)
   {
     VkMemoryType          t= props.memoryTypes[i];
     VkMemoryPropertyFlags f= t.propertyFlags;
-    printf("  type[%u]  heap=%u  flags=", i, t.heapIndex);
+    printf("type[%u]  heap=%u  flags=", i, t.heapIndex);
     if(!f)
     {
       puts("(none)");

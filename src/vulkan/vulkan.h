@@ -23,7 +23,6 @@
   }
 
 #define SHADERS_MAX 16
-#define BUFFERS_MAX 64
 #define ARENAS_MAX 32
 #define MB (1024 * 1024)
 
@@ -83,9 +82,9 @@ typedef struct gfxctx
   u32    nrframes;
 
   // memory
-  vkarena  arenas[32];
-  u32      nrarenas;
-  VkBuffer buffers[BUFFERS_MAX];
+  vkarena   arenas[32];
+  u32       nrarenas;
+  VkBuffer vtxbuf;
 
   // info
   u32                              gfxprs;
@@ -120,6 +119,13 @@ gfxctx *gfxinit(void *dpy);
 void    gfxterm(gfxctx *ctx);
 int     gfxinit_q(gfxctx *ctx);
 
+// placeholder
+typedef struct
+{
+  t2f32 pos;
+  t3f32 color;
+} vertex;
+
 // internal — init/term
 vkctx *init(void *dpy);
 void   term(vkctx *ctx);
@@ -129,7 +135,7 @@ int    initgfxppl(vkctx *ctx, const u32 *shcode, u32 shlen);
 int    reinitswp(vkctx *ctx, i32 w_new, i32 h_new);
 
 // internal — process
-int    render(vkctx *ctx);
+int render(vkctx *ctx);
 
 // internal — memory
 vkarena *arenainit(
@@ -139,7 +145,8 @@ void     arenaterm(vkctx *ctx, vkarena *arena);
 i64      arena_suballoc(vkarena *arena, usize bytes, usize align);
 i64      memalloc(vkctx *ctx, vkarena *arena, VkBuffer buf);
 usize    alignup(usize addr, usize align);
-VkBuffer updata_direct(vkctx *ctx, vkarena *rbar, const void *data, usize bytes);
+VkBuffer updata_direct(
+  vkctx *ctx, vkarena *rbar, const void *data, usize bytes);
 VkBuffer updata_staged(
   vkctx *ctx, vkarena *host, vkarena *dev, const void *data, usize bytes);
 
