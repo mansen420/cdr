@@ -3,8 +3,8 @@
 #include <time.h>
 #include <stdio.h>
 
-#include "defs.h"
-#include "raster.h"
+#include "include/defs.h"
+#include "src/raster.h"
 
 int main(int argc, char *argv[])
 {
