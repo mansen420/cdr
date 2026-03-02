@@ -2,6 +2,11 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <vulkan/vulkan_core.h>
+
+#include "include/display.h"
 
 static const char *const VK_LAYER_VALID_NAME= "VK_LAYER_KHRONOS_validation";
 
@@ -14,6 +19,9 @@ vkctx *init(void *dpy)
     VkInstanceCreateInfo info= {0};
     info.sType               = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 
+    // XXX these are created once statically, if we have multiple
+    // contexts, they will share the same layer info. just copy the layers
+    // into the context
     static const char *layers[]= {VK_LAYER_VALID_NAME};
     info.ppEnabledLayerNames   = layers;
     info.enabledLayerCount     = 1;
@@ -829,7 +837,7 @@ usize alignup(usize addr, usize align)
 {
   return (addr + align - 1) & ~(align - 1);
 }
-i64 memalloc(vkarena *arena, usize bytes, usize align)
+i64 arena_suballoc(vkarena *arena, usize bytes, usize align)
 {
   if(!arena) goto err;
 
@@ -851,6 +859,31 @@ i64 memalloc(vkarena *arena, usize bytes, usize align)
 err:
   return -1;
 }
+i64 memalloc(vkctx *ctx, vkarena *arena, VkBuffer buf)
+{
+  if(!ctx || !arena || !buf) return -1;
+
+  VkMemoryRequirements reqs;
+  vkGetBufferMemoryRequirements(ctx->dev, buf, &reqs);
+
+  if(!(reqs.memoryTypeBits & (1U << arena->typeidx))) return -1;
+
+  usize saved_offset= arena->offset;
+  usize saved_slop  = arena->slop;
+
+  i64 offset= arena_suballoc(arena, reqs.size, reqs.alignment);
+  if(offset < 0) return -1;
+
+  VkResult res= vkBindBufferMemory(ctx->dev, buf, arena->data, (usize)offset);
+  if(res != 0)
+  {
+    arena->offset= saved_offset;
+    arena->slop  = saved_slop;
+    return -1;
+  }
+
+  return offset;
+}
 
 void arenaclear(vkarena *arena)
 {
@@ -864,7 +897,100 @@ void arenaterm(vkctx *ctx, vkarena *arena)
   memset(arena, 0, sizeof *arena);
 }
 
-static int updata_staged(void);
+VkBuffer updata_staged(
+  vkctx *ctx, vkarena *host, vkarena *dev, const void *data, usize bytes)
+{
+  // function scope
+  VkBuffer        staging= VKNULL, buf= VKNULL;
+  VkCommandBuffer cmdbuf= VKNULL;
+  VkFence         fence = VKNULL;
+  VkResult        res;
+
+  if(!ctx || !host || !dev || !data) goto err;
+
+  if(!ctx->gfxcmdpool) goto err;
+
+  if(!(host->flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) goto err;
+  if(!(dev->flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) goto err;
+
+  // create and bind device buffer
+  {
+    VkBufferCreateInfo info= {
+      .sType= VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+      .size = bytes,
+      .usage=
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT};
+    OK(vkCreateBuffer(ctx->dev, &info, NULL, &buf), goto err;)
+
+    i64 offset= memalloc(ctx, dev, buf);
+    if(offset < 0) goto err;
+  }
+  // create and bind staging buffer, and copy data
+  {
+    VkBufferCreateInfo info= {
+      .sType= VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+      .size = bytes,
+      .usage= VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+    OK(vkCreateBuffer(ctx->dev, &info, NULL, &staging), goto err;)
+
+    i64 offset= memalloc(ctx, host, staging);
+    if(offset < 0) goto err;
+
+    void *addr;
+    OK(vkMapMemory(ctx->dev, host->data, (VkDeviceSize)offset, bytes, 0, &addr),
+       goto err;)
+    memcpy(addr, data, bytes);
+    vkUnmapMemory(ctx->dev, host->data);
+  }
+
+  // create command buffer
+  {
+    VkCommandBufferAllocateInfo info= {
+      .sType             = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+      .commandPool       = ctx->gfxcmdpool,
+      .commandBufferCount= 1};
+    OK(vkAllocateCommandBuffers(ctx->dev, &info, &cmdbuf), goto err;)
+  }
+  // record cmds
+  {
+    VkCommandBufferBeginInfo info= {
+      .sType= VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+      .flags= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
+    OK(vkBeginCommandBuffer(cmdbuf, &info), goto err;)
+    VkBufferCopy copy= {.dstOffset= 0, .srcOffset= 0, .size= bytes};
+    vkCmdCopyBuffer(cmdbuf, staging, buf, 1, &copy);
+    vkEndCommandBuffer(cmdbuf);
+  }
+  // create fence
+  {
+    VkFenceCreateInfo info= {.sType= VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    OK(vkCreateFence(ctx->dev, &info, NULL, &fence), goto err;)
+  }
+  // submit cmds
+  {
+    VkCommandBufferSubmitInfo cmdinfo= {
+      .sType        = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+      .commandBuffer= cmdbuf};
+    VkSubmitInfo2 info= {
+      .sType                 = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+      .commandBufferInfoCount= 1,
+      .pCommandBufferInfos   = &cmdinfo};
+    OK(vkQueueSubmit2(ctx->gfxq, 1, &info, fence), goto err;)
+  }
+
+  OK(vkWaitForFences(ctx->dev, 1, &fence, VK_TRUE, UINT64_MAX), goto err;)
+
+  if(staging) vkDestroyBuffer(ctx->dev, staging, NULL);
+  if(cmdbuf) vkFreeCommandBuffers(ctx->dev, ctx->gfxcmdpool, 1, &cmdbuf);
+  if(fence) vkDestroyFence(ctx->dev, fence, NULL);
+  return buf;
+err:
+  if(staging) vkDestroyBuffer(ctx->dev, staging, NULL);
+  if(cmdbuf) vkFreeCommandBuffers(ctx->dev, ctx->gfxcmdpool, 1, &cmdbuf);
+  if(fence) vkDestroyFence(ctx->dev, fence, NULL);
+  if(buf) vkDestroyBuffer(ctx->dev, buf, NULL);
+  return VKNULL;
+}
 VkBuffer updata_direct(vkctx *ctx, vkarena *rbar, const void *data, usize bytes)
 {
   VkMemoryPropertyFlags flags=
@@ -883,19 +1009,11 @@ VkBuffer updata_direct(vkctx *ctx, vkarena *rbar, const void *data, usize bytes)
   res= vkCreateBuffer(ctx->dev, &info, NULL, &buf);
   OK(res, goto err;)
 
-  VkMemoryRequirements reqs;
-  vkGetBufferMemoryRequirements(ctx->dev, buf, &reqs);
-
-  if(!(((u32)1 << rbar->typeidx) & reqs.memoryTypeBits)) goto err;
-
-  i64 offset= memalloc(rbar, reqs.size, reqs.alignment);
+  i64 offset= memalloc(ctx, rbar, buf);
   if(offset < 0) goto err;
 
-  res= vkBindBufferMemory(ctx->dev, buf, rbar->data, offset);
-  OK(res, goto err;)
-
   void *mapped;
-  res= vkMapMemory(ctx->dev, rbar->data, offset, reqs.size, 0, &mapped);
+  res= vkMapMemory(ctx->dev, rbar->data, (usize)offset, bytes, 0, &mapped);
   OK(res, goto err;)
   memcpy(mapped, data, bytes);
   vkUnmapMemory(ctx->dev, rbar->data);
@@ -905,6 +1023,8 @@ err:
   if(buf) vkDestroyBuffer(ctx->dev, buf, NULL);
   return VKNULL;
 }
+
+// app
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -926,6 +1046,8 @@ void       handle_resize(i32 w, i32 h, void *ctx)
 int main(int argc, char **argv)
 {
   int     rc = 0;
+  u32 *shader= NULL;
+
   dpyctx *dpy= dpyinit("title", 800, 600, 0);
   vkctx  *ctx= gfxinit(dpy);
 
@@ -950,7 +1072,6 @@ int main(int argc, char **argv)
   dpysetclscb(dpy, handle_close);
   dpysetusrdata(dpy, ctx);
 
-  u32 *shader= NULL;
   u32  nbytes= 0;
   {
     const char *path= argc > 1 ? argv[1] : "./assets/shader.spv";

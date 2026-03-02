@@ -106,7 +106,7 @@ static void test_alignup_power_of_two_alignments(void)
 }
 
 // ---------------------------------------------------------------------------
-// memalloc
+// arena_suballoc
 // ---------------------------------------------------------------------------
 
 // Helper: build a fake arena on the stack with no real VkDeviceMemory.
@@ -117,104 +117,104 @@ static vkarena make_arena(usize size)
   memset(&a, 0, sizeof a);
   a.size  = size;
   a.flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-  // a.data remains VK_NULL_HANDLE; memalloc never dereferences it
+  // a.data remains VK_NULL_HANDLE; arena_suballoc never dereferences it
   return a;
 }
 
-static void test_memalloc_null_arena(void)
+static void test_arena_suballoc_null_arena(void)
 {
   // NULL arena must return -1
-  i64 result = memalloc(NULL, 64, 4);
-  CHECK(result == -1, "memalloc(NULL, ...) should return -1");
+  i64 result = arena_suballoc(NULL, 64, 4);
+  CHECK(result == -1, "arena_suballoc(NULL, ...) should return -1");
 }
 
-static void test_memalloc_first_alloc_offset_zero(void)
+static void test_arena_suballoc_first_alloc_offset_zero(void)
 {
   // The first allocation from a fresh arena with align==1 should be at offset 0
   vkarena arena = make_arena(1024);
-  i64 offset = memalloc(&arena, 64, 1);
-  CHECK(offset == 0, "first memalloc with align=1 should return offset 0");
+  i64 offset = arena_suballoc(&arena, 64, 1);
+  CHECK(offset == 0, "first arena_suballoc with align=1 should return offset 0");
 }
 
-static void test_memalloc_advances_offset(void)
+static void test_arena_suballoc_advances_offset(void)
 {
   // After a 64-byte allocation the arena offset should have moved forward by 64
   vkarena arena = make_arena(1024);
-  memalloc(&arena, 64, 1);
+  arena_suballoc(&arena, 64, 1);
   CHECK(arena.offset == 64, "arena.offset should be 64 after one 64-byte alloc");
 }
 
-static void test_memalloc_second_alloc_after_first(void)
+static void test_arena_suballoc_second_alloc_after_first(void)
 {
   // Second alloc (align=1) starts immediately after the first
   vkarena arena = make_arena(1024);
-  memalloc(&arena, 64, 1);
-  i64 second = memalloc(&arena, 32, 1);
-  CHECK(second == 64, "second memalloc with align=1 should return offset 64");
+  arena_suballoc(&arena, 64, 1);
+  i64 second = arena_suballoc(&arena, 32, 1);
+  CHECK(second == 64, "second arena_suballoc with align=1 should return offset 64");
   CHECK(arena.offset == 96, "arena.offset should be 96 after two allocs (64+32)");
 }
 
-static void test_memalloc_alignment_padding_tracked_in_slop(void)
+static void test_arena_suballoc_alignment_padding_tracked_in_slop(void)
 {
   // Start with offset=1, request align=4: alignup(1,4)==4, overhead=3, slop+=3
   vkarena arena = make_arena(1024);
-  memalloc(&arena, 1, 1);          // offset becomes 1
-  i64 second = memalloc(&arena, 8, 4);  // aligned to 4 → offset 4, slop should be 3
-  CHECK(second == 4,         "memalloc with align=4 from offset 1 should return 4");
+  arena_suballoc(&arena, 1, 1);          // offset becomes 1
+  i64 second = arena_suballoc(&arena, 8, 4);  // aligned to 4 → offset 4, slop should be 3
+  CHECK(second == 4,         "arena_suballoc with align=4 from offset 1 should return 4");
   CHECK(arena.slop == 3,     "3 bytes of padding should be recorded in arena.slop");
   CHECK(arena.offset == 12,  "offset should be 12 (4 aligned + 8 bytes)");
 }
 
-static void test_memalloc_overflow_returns_minus_one(void)
+static void test_arena_suballoc_overflow_returns_minus_one(void)
 {
   // Requesting more bytes than the arena holds must return -1
   vkarena arena = make_arena(64);
-  i64 result = memalloc(&arena, 128, 1);
-  CHECK(result == -1, "memalloc should return -1 when bytes exceed arena size");
+  i64 result = arena_suballoc(&arena, 128, 1);
+  CHECK(result == -1, "arena_suballoc should return -1 when bytes exceed arena size");
 }
 
-static void test_memalloc_exact_fit(void)
+static void test_arena_suballoc_exact_fit(void)
 {
   // An allocation that exactly fills the remaining space should succeed
   vkarena arena = make_arena(64);
-  i64 result = memalloc(&arena, 64, 1);
-  CHECK(result == 0, "exact-fit memalloc should succeed and return 0");
+  i64 result = arena_suballoc(&arena, 64, 1);
+  CHECK(result == 0, "exact-fit arena_suballoc should succeed and return 0");
   CHECK(arena.offset == 64, "arena.offset should equal arena.size after exact fill");
 }
 
-static void test_memalloc_one_past_capacity_returns_minus_one(void)
+static void test_arena_suballoc_one_past_capacity_returns_minus_one(void)
 {
   // An allocation of size+1 must be rejected
   vkarena arena = make_arena(64);
-  i64 result = memalloc(&arena, 65, 1);
-  CHECK(result == -1, "memalloc of size+1 should return -1");
+  i64 result = arena_suballoc(&arena, 65, 1);
+  CHECK(result == -1, "arena_suballoc of size+1 should return -1");
 }
 
-static void test_memalloc_overflow_after_partial_use(void)
+static void test_arena_suballoc_overflow_after_partial_use(void)
 {
   // Fill most of the arena then try an allocation that would overflow
   vkarena arena = make_arena(64);
-  memalloc(&arena, 48, 1);        // 16 bytes remain
-  i64 result = memalloc(&arena, 17, 1);
-  CHECK(result == -1, "memalloc should return -1 when remaining space is insufficient");
+  arena_suballoc(&arena, 48, 1);        // 16 bytes remain
+  i64 result = arena_suballoc(&arena, 17, 1);
+  CHECK(result == -1, "arena_suballoc should return -1 when remaining space is insufficient");
 }
 
-static void test_memalloc_alignment_overflow_returns_minus_one(void)
+static void test_arena_suballoc_alignment_overflow_returns_minus_one(void)
 {
   // Fill arena to 1 byte from end, then request align=256 — padding alone overflows
   vkarena arena = make_arena(64);
-  memalloc(&arena, 63, 1);   // offset == 63, 1 byte free
-  i64 result = memalloc(&arena, 1, 256);
+  arena_suballoc(&arena, 63, 1);   // offset == 63, 1 byte free
+  i64 result = arena_suballoc(&arena, 1, 256);
   CHECK(result == -1,
-        "memalloc should return -1 when alignment padding alone overflows the arena");
+        "arena_suballoc should return -1 when alignment padding alone overflows the arena");
 }
 
-static void test_memalloc_slop_zero_on_no_padding(void)
+static void test_arena_suballoc_slop_zero_on_no_padding(void)
 {
   // When all allocations are already aligned, slop must stay 0
   vkarena arena = make_arena(256);
-  memalloc(&arena, 16, 16);
-  memalloc(&arena, 32, 16);
+  arena_suballoc(&arena, 16, 16);
+  arena_suballoc(&arena, 32, 16);
   CHECK(arena.slop == 0, "slop should be 0 when all allocations are naturally aligned");
 }
 
@@ -226,8 +226,8 @@ static void test_arenaclear_resets_offset_and_slop(void)
 {
   // After allocating with padding, arenaclear must zero both offset and slop
   vkarena arena = make_arena(1024);
-  memalloc(&arena, 1, 1);         // offset == 1
-  memalloc(&arena, 8, 4);         // offset == 12, slop == 3
+  arena_suballoc(&arena, 1, 1);         // offset == 1
+  arena_suballoc(&arena, 8, 4);         // offset == 12, slop == 3
 
   arenaclear(&arena);
 
@@ -239,11 +239,11 @@ static void test_arenaclear_reuse_after_clear(void)
 {
   // After clearing, the next allocation should return offset 0 again
   vkarena arena = make_arena(1024);
-  memalloc(&arena, 100, 1);
+  arena_suballoc(&arena, 100, 1);
 
   arenaclear(&arena);
 
-  i64 result = memalloc(&arena, 64, 1);
+  i64 result = arena_suballoc(&arena, 64, 1);
   CHECK(result == 0,         "first alloc after arenaclear should return offset 0");
   CHECK(arena.offset == 64,  "arena.offset should be 64 after alloc post-clear");
 }
@@ -254,7 +254,7 @@ static void test_arenaclear_preserves_size_and_flags(void)
   vkarena arena = make_arena(512);
   arena.flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-  memalloc(&arena, 128, 1);
+  arena_suballoc(&arena, 128, 1);
 
   usize saved_size  = arena.size;
   u32   saved_flags = arena.flags;
@@ -263,6 +263,44 @@ static void test_arenaclear_preserves_size_and_flags(void)
 
   CHECK(arena.size  == saved_size,  "arenaclear must not modify arena.size");
   CHECK(arena.flags == saved_flags, "arenaclear must not modify arena.flags");
+}
+
+// ---------------------------------------------------------------------------
+// updata_direct — guard conditions (no GPU required)
+// ---------------------------------------------------------------------------
+
+static void test_updata_direct_null_ctx(void)
+{
+  vkarena arena= {0};
+  arena.flags  = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+  arena.size= 1024;
+  u8       data= 42;
+  VkBuffer buf = updata_direct(NULL, &arena, &data, sizeof data);
+  CHECK(buf == VKNULL, "updata_direct(NULL ctx) must return VKNULL");
+}
+
+static void test_updata_direct_null_data(void)
+{
+  vkctx    ctx = {0};
+  vkarena  arena= {0};
+  arena.flags   = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+  arena.size    = 1024;
+  VkBuffer buf  = updata_direct(&ctx, &arena, NULL, 16);
+  CHECK(buf == VKNULL, "updata_direct(NULL data) must return VKNULL");
+}
+
+static void test_updata_direct_wrong_flags(void)
+{
+  // Arena is HOST_VISIBLE only — not rBAR (missing DEVICE_LOCAL)
+  vkctx    ctx = {0};
+  vkarena  arena= {0};
+  arena.flags   = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+  arena.size    = 1024;
+  u8       data = 0;
+  VkBuffer buf  = updata_direct(&ctx, &arena, &data, sizeof data);
+  CHECK(buf == VKNULL, "updata_direct with non-rBAR arena must return VKNULL");
 }
 
 // ---------------------------------------------------------------------------
@@ -282,23 +320,28 @@ int main(void)
   test_alignup_align_one();
   test_alignup_power_of_two_alignments();
 
-  // memalloc
-  test_memalloc_null_arena();
-  test_memalloc_first_alloc_offset_zero();
-  test_memalloc_advances_offset();
-  test_memalloc_second_alloc_after_first();
-  test_memalloc_alignment_padding_tracked_in_slop();
-  test_memalloc_overflow_returns_minus_one();
-  test_memalloc_exact_fit();
-  test_memalloc_one_past_capacity_returns_minus_one();
-  test_memalloc_overflow_after_partial_use();
-  test_memalloc_alignment_overflow_returns_minus_one();
-  test_memalloc_slop_zero_on_no_padding();
+  // arena_suballoc
+  test_arena_suballoc_null_arena();
+  test_arena_suballoc_first_alloc_offset_zero();
+  test_arena_suballoc_advances_offset();
+  test_arena_suballoc_second_alloc_after_first();
+  test_arena_suballoc_alignment_padding_tracked_in_slop();
+  test_arena_suballoc_overflow_returns_minus_one();
+  test_arena_suballoc_exact_fit();
+  test_arena_suballoc_one_past_capacity_returns_minus_one();
+  test_arena_suballoc_overflow_after_partial_use();
+  test_arena_suballoc_alignment_overflow_returns_minus_one();
+  test_arena_suballoc_slop_zero_on_no_padding();
 
   // arenaclear
   test_arenaclear_resets_offset_and_slop();
   test_arenaclear_reuse_after_clear();
   test_arenaclear_preserves_size_and_flags();
+
+  // updata_direct — guard conditions only (no GPU required)
+  test_updata_direct_null_ctx();
+  test_updata_direct_null_data();
+  test_updata_direct_wrong_flags();
 
   printf("%d/%d tests passed.\n", tests_run - tests_failed, tests_run);
   return tests_failed > 0 ? 1 : 0;
