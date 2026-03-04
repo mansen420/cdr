@@ -347,6 +347,7 @@ void term(vkctx *ctx)
   vkDeviceWaitIdle(ctx->dev);
 
   if(ctx->vtxbuf) vkDestroyBuffer(ctx->dev, ctx->vtxbuf, NULL);
+  for(unsigned i= 0; i < ARENAS_MAX; i++) arenaterm(ctx, &ctx->arenas[i]);
   for(unsigned i= 0; i < ctx->nrframes; i++) frmterm(ctx, i);
   if(ctx->prscmdpool) vkDestroyCommandPool(ctx->dev, ctx->prscmdpool, NULL);
   if(ctx->gfxcmdpool) vkDestroyCommandPool(ctx->dev, ctx->gfxcmdpool, NULL);
@@ -490,6 +491,14 @@ err:
 gfxctx *gfxinit(void *dpy) { return init(dpy); }
 void    gfxterm(gfxctx *ctx) { term(ctx); }
 int     gfxinit_q(gfxctx *ctx) { return ctx && ctx->alive; }
+void    gfxpause(gfxctx *ctx) { ctx->pause= 1; }
+void    gfxresume(gfxctx *ctx) { ctx->pause= 0; }
+int     gfxrender(gfxctx *ctx) { return render(ctx); }
+void    gfxupdate(gfxctx *ctx, i32 w, i32 h)
+{
+  vkDeviceWaitIdle(ctx->dev);
+  reinitswp(ctx, w, h);
+}
 
 int frminit(vkctx *ctx)
 {
@@ -648,40 +657,42 @@ err:
 
 int render(vkctx *ctx)
 {
-  static u32 absfrmidx= 0;
-  static u32 frmidx   = 0;
-  VkResult   res      = VK_SUCCESS;
+  if(ctx->pause) return 0;
 
-  frmctx *frm= &ctx->frames[frmidx];
+  VkResult res= VK_SUCCESS;
+
+  frmctx *frm= &ctx->frames[ctx->frmidx];
 
   vkWaitForFences(ctx->dev, 1, &frm->fence, VK_TRUE, UINT64_MAX);
 
   // print diagnostics
   {
-    static struct timespec t_last           = {0};
-    static u64             acc_ns           = 0;
-    static u32             acc_count        = 0;
-    static const u64       PRINT_INTERVAL_NS= (1000000000ULL / 15);
-    struct timespec        t_now;
+    static const u64 PRINT_INTERVAL_NS= (1000000000ULL / 15);
+    struct timespec  t_now;
     clock_gettime(CLOCK_MONOTONIC, &t_now);
-    if(t_last.tv_sec || t_last.tv_nsec)
+    if(ctx->diag_t_last.tv_sec || ctx->diag_t_last.tv_nsec)
     {
-      u64 delta_ns= (u64)(t_now.tv_sec - t_last.tv_sec) * 1000000000ULL +
-                    (u64)(t_now.tv_nsec - t_last.tv_nsec);
-      acc_ns+= delta_ns;
-      acc_count++;
-      if(acc_ns >= PRINT_INTERVAL_NS)
+      u64 delta_ns= (u64)(t_now.tv_sec - ctx->diag_t_last.tv_sec) * 1000000000ULL +
+                    (u64)(t_now.tv_nsec - ctx->diag_t_last.tv_nsec);
+      ctx->diag_acc_ns+= delta_ns;
+      ctx->diag_acc_count++;
+      if(ctx->diag_acc_ns >= PRINT_INTERVAL_NS)
       {
-        double avg_ms = (double)acc_ns / acc_count / 1e6;
-        double avg_fps= 1e9 / ((double)acc_ns / acc_count);
-        printf(
-          "frame=%-6u  ft=%-4.3fms  fps=%-8.1f\r", absfrmidx, avg_ms, avg_fps);
-        fflush(stdout);
-        acc_ns   = 0;
-        acc_count= 0;
+        double avg_ms = (double)ctx->diag_acc_ns / ctx->diag_acc_count / 1e6;
+        double avg_fps= 1e9 / ((double)ctx->diag_acc_ns / ctx->diag_acc_count);
+				// comment out the print. later just write this to some frame diagnostics
+				// struct
+        //printf( 
+        //  "frame=%-6u  ft=%-4.3fms  fps=%-8.1f\r",
+        //  ctx->absfrmidx,
+        //  avg_ms,
+        //  avg_fps);
+        //fflush(stdout);
+        ctx->diag_acc_ns   = 0;
+        ctx->diag_acc_count= 0;
       }
     }
-    t_last= t_now;
+    ctx->diag_t_last= t_now;
   }
 
   VkSemaphore acqsem= frm->imggotten;
@@ -806,8 +817,8 @@ int render(vkctx *ctx)
     OK(res, goto err;)
   }
 
-  frmidx= (frmidx + 1) % ctx->nrframes;
-  absfrmidx++;
+  ctx->frmidx= (ctx->frmidx + 1) % ctx->nrframes;
+  ctx->absfrmidx++;
   return 0;
 err:
   if(res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) return 1;
@@ -1025,7 +1036,7 @@ VkBuffer updata_direct(vkctx *ctx, vkarena *rbar, const void *data, usize bytes)
   VkBuffer buf= VKNULL;
   VkResult res;
 
-  if(!ctx || !data || (rbar->flags & flags) != flags) goto err;
+  if(!ctx || !data || ((rbar->flags & flags) != flags)) goto err;
 
   VkBufferCreateInfo info= {
     .sType      = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -1050,107 +1061,51 @@ err:
   return VKNULL;
 }
 
-// app
-
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-static int quit= 0;
-void       handle_close(void *) { quit= 1; }
-void       handle_resize(i32 w, i32 h, void *ctx)
+int gfxprep(gfxctx *ctx, const u32 *spv, usize nrbytes)
 {
-  if(!ctx) return;
-  vkctx *vk= ctx;
+	if(!ctx || !spv || !nrbytes) goto err;
+	// upload
+	{
+		vkarena *mem_host= NULL, *mem_dev= NULL,
+						*mem_rbar= arenainit(
+							ctx,
+							0,
+							10 * MB,
+							VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+								VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+								VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		if(!mem_rbar)  // staging
+		{
+			mem_host= arenainit(ctx, 0, 2 * MB, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+			NNUL(mem_host, goto err;)
 
-  vkDeviceWaitIdle(vk->dev);
+			mem_dev= arenainit(ctx, 1, 10 * MB, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+			NNUL(mem_dev, goto err;)
+		}
 
-  reinitswp(vk, w, h);
-}
+		vertex triangle[3]= {
+			{.pos= {.x= 0.0f, .y= -0.5f}, .color= {.r= 1.f, .g= 0.f, .b= 0.f}},
+			{.pos= {.x= 0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 1.f, .b= 0.f}},
+			{.pos= {.x= -0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 0.f, .b= 1.f}}};
+		
+		if(mem_rbar)
+			ctx->vtxbuf= updata_direct(ctx, mem_rbar, triangle, sizeof triangle);
+		else
+			ctx->vtxbuf= updata_staged(ctx, mem_host, mem_dev, triangle, sizeof triangle);
 
-#ifndef TESTING
-int main(int argc, char **argv)
-{
-  int  rc    = 0;
-  u32 *shader= NULL;
-
-  dpyctx *dpy= dpyinit("title", 800, 600, 0);
-  vkctx  *ctx= gfxinit(dpy);
-
-  vkarena *mem_host= NULL, *mem_dev= NULL,
-          *mem_rbar= arenainit(
-            ctx,
-            0,
-            10 * MB,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-  if(!mem_rbar)  // staging
-  {
-    mem_host= arenainit(ctx, 0, 2 * MB, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-    NNUL(mem_host, goto exit;)
-
-    mem_dev= arenainit(ctx, 1, 10 * MB, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    NNUL(mem_dev, goto exit;)
-  }
-
-  vertex triangle[3]= {
-    {.pos= {.x= 0.0f, .y= -0.5f}, .color= {.r= 1.f, .g= 0.f, .b= 0.f}},
-    {.pos= {.x= 0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 1.f, .b= 0.f}},
-    {.pos= {.x= -0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 0.f, .b= 1.f}}};
+		arenaterm(ctx, mem_host);  // staging only — device arenas persist until gfxterm
+	}
 	
-  if(mem_rbar)
-    ctx->vtxbuf= updata_direct(ctx, mem_rbar, triangle, sizeof triangle);
-  else
-    ctx->vtxbuf= updata_staged(ctx, mem_host, mem_dev, triangle, sizeof triangle);
-  NNUL(ctx->vtxbuf, goto exit;)
+	NNUL(ctx->vtxbuf, goto err;)
+	// init
+  OK(initgfxppl(ctx, spv, nrbytes), goto err;)
+  OK(frminit(ctx), goto err;)
 
-  dpysetrszcb(dpy, handle_resize);
-  dpysetclscb(dpy, handle_close);
-  dpysetusrdata(dpy, ctx);
-
-  u32 nbytes= 0;
-  {
-    const char *path= argc > 1 ? argv[1] : "./assets/shader.spv";
-
-    int fd= open(path, O_RDONLY);
-    if(fd == -1)
-    {
-      puts("IO failure");
-      goto exit;
-    }
-    struct stat st;
-    fstat(fd, &st);
-    nbytes = st.st_size;
-    shader = malloc(nbytes);
-    i64 rdb= read(fd, shader, nbytes);
-    if(rdb != nbytes) puts("IO warning");
-    close(fd);
-  }
-  rc= initgfxppl(ctx, shader, nbytes);
-  rc= frminit(ctx);
-  OK(rc, goto exit;)
-
-  while(dpypoll(dpy) == 0 && !quit)
-  {
-    int renderc= render(ctx);
-    if(renderc < 0)
-      break;
-    else if(renderc == 1)
-      puts("RESIZE");
-  }
-
-  vkDeviceWaitIdle(ctx->dev);
-exit:
-  arenaterm(ctx, mem_rbar);
-  arenaterm(ctx, mem_dev);
-  arenaterm(ctx, mem_host);
-  gfxterm(ctx);
-  dpyterm(dpy);
-  free(shader);
-  return rc;
+	return 0;
+err:
+	return -1;
 }
-#endif  // TESTING
+
 
 void printmeminfo(const vkctx *ctx)
 {

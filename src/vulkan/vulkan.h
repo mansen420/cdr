@@ -6,6 +6,8 @@
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_wayland.h>
 
+#include <time.h>
+
 #include "include/defs.h"
 #include "include/graphics.h"
 
@@ -86,6 +88,14 @@ typedef struct gfxctx
   u32       nrarenas;
   VkBuffer vtxbuf;
 
+  // render state
+  u32             frmidx;
+  u32             absfrmidx;
+  volatile int    pause;
+  struct timespec diag_t_last;
+  u64             diag_acc_ns;
+  u32             diag_acc_count;
+
   // info
   u32                              gfxprs;
   VkPhysicalDeviceFeatures2        gpufeats;
@@ -113,11 +123,6 @@ typedef struct gfxctx
 
   u32 alive;
 } vkctx;
-
-// public API (mirrored from graphics.h)
-gfxctx *gfxinit(void *dpy);
-void    gfxterm(gfxctx *ctx);
-int     gfxinit_q(gfxctx *ctx);
 
 // placeholder
 typedef struct
