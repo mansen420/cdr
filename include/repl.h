@@ -1,13 +1,8 @@
 #pragma once
 
-typedef struct gfxctx gfxctx;
+#include "include/graphics.h"
 
-typedef struct
-{
-  volatile int quit;
-  volatile int paused;
-  gfxctx      *gfx;
-} replctx;
+typedef struct replctx replctx;
 
 replctx *replinit(gfxctx *);
 void     replterm(replctx *);
