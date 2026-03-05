@@ -2,9 +2,11 @@
 
 #include "include/defs.h"
 
+#include "include/display.h"
+
 typedef struct gfxctx gfxctx;
 
-gfxctx *gfxinit(void *dpyctx);
+gfxctx *gfxinit(dpyctx *dpy);
 void    gfxterm(gfxctx *);
 int     gfxinit_q(gfxctx *);
 void    gfxpause(gfxctx *);

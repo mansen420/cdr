@@ -488,7 +488,7 @@ err:
   return -1;
 }
 
-gfxctx *gfxinit(void *dpy) { return init(dpy); }
+gfxctx *gfxinit(dpyctx *dpy) { return init(dpy); }
 void    gfxterm(gfxctx *ctx) { term(ctx); }
 int     gfxinit_q(gfxctx *ctx) { return ctx && ctx->alive; }
 void    gfxpause(gfxctx *ctx) { ctx->pause= 1; }
