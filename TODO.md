@@ -1,29 +1,31 @@
-# Known Bugs
+## s7 REPL blocks the main thread (render loop stalls)
 
-## SIGSEGV on REPL `exit` command
+**Symptom:** Window freezes as soon as the engine starts. No frames are
+rendered while the REPL is waiting for input.
 
-**Symptom:** Typing `exit` in the REPL causes a SIGSEGV and crashes the process.
+**Root cause:** `s7_repl()` is a blocking call. `main.c` currently calls
+`reploop()` directly on the main thread, which also owns the Wayland event
+loop and render loop. The two cannot share the same thread.
 
-**Root cause:** Use-after-free on `replctx`.
+**Location:** `src/main.c` — `reploop(repl)` is called before any render loop.
 
-When the REPL thread handles `exit`, `reploop()` sets `ctx->quit = 1` and
-returns. `repl_thread_fn` then calls `replterm(arg)`, freeing the `replctx`.
-Meanwhile, the main render loop is still reading `repl->quit` in its loop
-condition — the pointer is now dangling.
+**Fix direction:** Run the REPL on a background thread (as was done before
+`main.c` was separated out). `pthread_create` → `reploop` on worker thread,
+main thread owns `dpypoll` + `gfxrender`.
 
-```c
-// src/repl/repl.c — main render loop
-while(dpypoll(dpy) == 0 && !repl->quit && !quit)  // repl may be freed here
-```
+---
 
-**Location:** `src/repl/repl.c` — `repl_thread_fn` and the main render loop.
+## No gfx FFI registered in s7
 
-**Fix direction:** `replctx` ownership is ambiguous between the two threads.
-Options:
-- Move `replterm` back to the main thread (after `pthread_join`), drop the
-  detach. Accept the blocked-join-on-fgets cost.
-- Keep detach but replace `repl->quit` in the loop condition with a separate
-  `volatile int quit_repl` local to `main()`, written by the REPL thread via
-  a pointer stored at init time. `replctx` can be freed by the thread without
-  invalidating the flag the main thread reads.
-- Use an atomic or a mutex-protected flag.
+**Symptom:** The s7 REPL has no engine bindings — `(gfx-pause)`, `(gfx-render)`,
+etc. are undefined.
+
+**Root cause:** `replinit` initialises `s7_init()` but registers no C
+functions. The FFI layer has not been written yet.
+
+**Location:** `src/repl/repl.c` — `init()`.
+
+**Fix direction:** Register C functions via `s7_define_function()` before
+handing off to `s7_repl()`. Engine context (`gfxctx *`) can be passed through
+a file-scope pointer since it is a singleton.
+
