@@ -6,7 +6,7 @@
 
 typedef struct gfxctx gfxctx;
 
-// ── vertex buffer ────────────────────────────────────────────────────────────
+// -- vertex buffer ------------------------------------------------------------
 #define GFX_MAX_VTXATTRS 8
 
 typedef enum
@@ -39,7 +39,7 @@ typedef struct gfxbuf gfxbuf;
 int     gfxinit_vtxbuf(gfxbuf **, gfxctx *, gfxdesc_vtxbuf);
 void    gfxterm_vtxbuf(gfxctx *, gfxbuf *);
 
-// ── image ────────────────────────────────────────────────────────────────────
+// -- image --------------------------------------------------------------------
 typedef enum
 {
   GFXFMT_RGBA8_SRGB,
@@ -61,10 +61,10 @@ typedef struct gfximg gfximg;
 int     gfxinit_img(gfximg **, gfxctx *, gfxdesc_img);
 void    gfxterm_img(gfxctx *, gfximg *);
 
-// ── pipeline ─────────────────────────────────────────────────────────────────
+// -- pipeline -----------------------------------------------------------------
 typedef struct gfxppl gfxppl;
 
-// ── context ──────────────────────────────────────────────────────────────────
+// -- context ------------------------------------------------------------------
 int     gfxinit(gfxctx **, dpyctx *);
 void    gfxterm(gfxctx *);
 int     gfxqry_init(gfxctx *);
