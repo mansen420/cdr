@@ -6,9 +6,68 @@
 
 typedef struct gfxctx gfxctx;
 
+// ── vertex buffer ────────────────────────────────────────────────────────────
+#define GFX_MAX_VTXATTRS 8
+
+typedef enum
+{
+  GFXFMT_2F32,
+  GFXFMT_3F32,
+  GFXFMT_4F32,
+  GFXFMT_2U8,
+  GFXFMT_3U8,
+  GFXFMT_4U8,
+} gfxfmt_vtx;
+
+typedef struct
+{
+  u32       offset;
+  gfxfmt_vtx fmt;
+} gfxvtxattr;
+
+typedef struct
+{
+  void       *data;
+  u32         vtxstride;
+  u32         nrvtx;
+  gfxvtxattr  attrs[GFX_MAX_VTXATTRS];
+  u32         nrattrs;
+} gfxdesc_vtxbuf;
+
+typedef struct gfxbuf gfxbuf;
+
+gfxbuf *gfxinit_vtxbuf(gfxctx *, gfxdesc_vtxbuf);
+void    gfxterm_vtxbuf(gfxctx *, gfxbuf *);
+
+// ── image ────────────────────────────────────────────────────────────────────
+typedef enum
+{
+  GFXFMT_RGBA8_SRGB,
+  GFXFMT_RGBA8_UNORM,
+  GFXFMT_BGRA8_SRGB,
+  GFXFMT_BGRA8_UNORM,
+  GFXFMT_R8_UNORM,
+  GFXFMT_D32_SFLOAT,
+} gfxfmt_img;
+
+typedef struct
+{
+  u32       w, h;
+  gfxfmt_img fmt;
+} gfxdesc_img;
+
+typedef struct gfximg gfximg;
+
+gfximg *gfxinit_img(gfxctx *, gfxdesc_img);
+void    gfxterm_img(gfxctx *, gfximg *);
+
+// ── pipeline ─────────────────────────────────────────────────────────────────
+typedef struct gfxppl gfxppl;
+
+// ── context ──────────────────────────────────────────────────────────────────
 gfxctx *gfxinit(dpyctx *dpy);
 void    gfxterm(gfxctx *);
-int     gfxinit_q(gfxctx *);
+int     gfxqry_init(gfxctx *);
 void    gfxpause(gfxctx *);
 void    gfxresume(gfxctx *);
 int     gfxrender(gfxctx *);
