@@ -52,7 +52,7 @@ void regobjr_h(void *, struct wl_registry *, uint32_t);
 void xdgping_h(void *, struct xdg_wm_base *, uint32_t);
 
 // public API (mirrored from display.h for internal use)
-wlctx *dpyinit(const char *, unsigned, unsigned, u32);
+int    dpyinit(dpyctx **, const char *, unsigned, unsigned, u32);
 void   dpyterm(dpyctx *);
 int    dpypoll(dpyctx *);
 int    dpyqry_init(dpyctx *);

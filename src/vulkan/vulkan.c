@@ -10,7 +10,7 @@
 
 static const char *const VK_LAYER_VALID_NAME= "VK_LAYER_KHRONOS_validation";
 
-vkctx *init(void *dpy)
+int init(vkctx **out, void *dpy)
 {
   vkctx *ctx= calloc(1, sizeof *ctx);
 
@@ -320,11 +320,12 @@ vkctx *init(void *dpy)
   }
 
   ctx->alive= 1;
-  return ctx;
+  *out= ctx;
+  return 0;
 err:
   gfxterm(ctx);
   puts("VK init erred");
-  return NULL;
+  return -1;
 }
 
 void frmterm(vkctx *ctx, u32 idx)
@@ -488,7 +489,7 @@ err:
   return -1;
 }
 
-gfxctx *gfxinit(dpyctx *dpy) { return init(dpy); }
+int     gfxinit(gfxctx **out, dpyctx *dpy) { return init(out, dpy); }
 void    gfxterm(gfxctx *ctx) { term(ctx); }
 int     gfxqry_init(gfxctx *ctx) { return ctx && ctx->alive; }
 void    gfxpause(gfxctx *ctx) { ctx->pause= 1; }

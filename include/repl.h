@@ -4,6 +4,6 @@
 
 typedef struct replctx replctx;
 
-replctx *replinit(gfxctx *);
+int      replinit(replctx **, gfxctx *);
 void     replterm(replctx *);
 void     reploop(replctx *);

@@ -9,7 +9,7 @@ typedef enum
 
 typedef struct dpyctx dpyctx;
 
-dpyctx *dpyinit(const char *title, unsigned width, unsigned height, u32 flags);
+int dpyinit(dpyctx **, const char *title, unsigned width, unsigned height, u32 flags);
 
 int         dpyget_err(dpyctx *);
 const char *dpyget_errstr(DPYERR);

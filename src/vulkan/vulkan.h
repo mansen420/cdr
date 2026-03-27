@@ -132,7 +132,7 @@ typedef struct
 } vertex;
 
 // internal — init/term
-vkctx *init(void *dpy);
+int    init(vkctx **, void *dpy);
 void   term(vkctx *ctx);
 void   frmterm(vkctx *ctx, u32 idx);
 int    frminit(vkctx *ctx);

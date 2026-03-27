@@ -94,7 +94,7 @@ void *dpyget_nwin(wlctx *ctx) { return ctx->surf; }
 void *dpyget_ncon(wlctx *ctx) { return ctx->disp; }
 int   dpyqry_init(dpyctx *ctx) { return ctx && ctx->alive; }
 
-wlctx *dpyinit(const char *title, unsigned w, unsigned h, u32 flags)
+int dpyinit(dpyctx **out, const char *title, unsigned w, unsigned h, u32 flags)
 {
   wlctx *ctx= calloc(1, sizeof *ctx);
 
@@ -139,11 +139,12 @@ wlctx *dpyinit(const char *title, unsigned w, unsigned h, u32 flags)
   wl_surface_commit(ctx->surf);
 
   ctx->alive= 1;
-  return ctx;
+  *out= ctx;
+  return 0;
 fail:
   ctx->err= DPYERR_INIT;
   dpyterm(ctx);
-  return NULL;
+  return -1;
 }
 void dpyterm(dpyctx *ctx)
 {

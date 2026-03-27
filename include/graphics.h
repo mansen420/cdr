@@ -36,7 +36,7 @@ typedef struct
 
 typedef struct gfxbuf gfxbuf;
 
-gfxbuf *gfxinit_vtxbuf(gfxctx *, gfxdesc_vtxbuf);
+int     gfxinit_vtxbuf(gfxbuf **, gfxctx *, gfxdesc_vtxbuf);
 void    gfxterm_vtxbuf(gfxctx *, gfxbuf *);
 
 // ── image ────────────────────────────────────────────────────────────────────
@@ -58,14 +58,14 @@ typedef struct
 
 typedef struct gfximg gfximg;
 
-gfximg *gfxinit_img(gfxctx *, gfxdesc_img);
+int     gfxinit_img(gfximg **, gfxctx *, gfxdesc_img);
 void    gfxterm_img(gfxctx *, gfximg *);
 
 // ── pipeline ─────────────────────────────────────────────────────────────────
 typedef struct gfxppl gfxppl;
 
 // ── context ──────────────────────────────────────────────────────────────────
-gfxctx *gfxinit(dpyctx *dpy);
+int     gfxinit(gfxctx **, dpyctx *);
 void    gfxterm(gfxctx *);
 int     gfxqry_init(gfxctx *);
 void    gfxpause(gfxctx *);

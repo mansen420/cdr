@@ -24,10 +24,8 @@ int main(int argc, char **argv)
   dpyctx  *dpy = NULL;
   replctx *repl= NULL;
 
-  dpy= dpyinit("CDR", 800, 600, 0);
-  if(!dpy) goto exit;
-  gfx= gfxinit(dpy);
-  if(!gfx) goto exit;
+  if(dpyinit(&dpy, "CDR", 800, 600, 0) < 0) goto exit;
+  if(gfxinit(&gfx, dpy) < 0) goto exit;
 
   // prepare shader
   {
@@ -55,8 +53,7 @@ int main(int argc, char **argv)
   dpyset_onclose(dpy, on_close);
   dpyset_usrdata(dpy, gfx);
 
-  repl= replinit(gfx);
-  if(!repl) goto exit;
+  if(replinit(&repl, gfx) < 0) goto exit;
 
   reploop(repl);
 

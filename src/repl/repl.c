@@ -20,7 +20,7 @@ static void term(replctx *ctx)
   free(ctx);
 }
 
-static replctx *init(gfxctx *gfx)
+static int init(replctx **out, gfxctx *gfx)
 {
   replctx *ctx= NULL;
   if(!gfx) goto err;
@@ -33,10 +33,11 @@ static replctx *init(gfxctx *gfx)
 
   ctx->gfx= gfx;
 
-  return ctx;
+  *out= ctx;
+  return 0;
 err:
   term(ctx);
-  return NULL;
+  return -1;
 }
 
 static void loop(replctx *ctx)
@@ -45,6 +46,6 @@ static void loop(replctx *ctx)
   ctx->quit= 1;
 }
 
-replctx *replinit(gfxctx *gfx) { return init(gfx); }
+int      replinit(replctx **out, gfxctx *gfx) { return init(out, gfx); }
 void     replterm(replctx *ctx) { term(ctx); }
 void     reploop(replctx *ctx) { loop(ctx); }

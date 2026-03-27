@@ -64,11 +64,12 @@ static void test_dpyqry_init_alive_set(void)
 static void test_dpyinit_no_compositor(void)
 {
   // Point WAYLAND_DISPLAY at a socket that cannot exist so that
-  // wl_display_connect fails.  dpyinit must return NULL without crashing.
+  // wl_display_connect fails.  dpyinit must return <0 without crashing.
   setenv("WAYLAND_DISPLAY", "wayland-test-nonexistent-9999", 1);
 
-  wlctx *ctx = dpyinit("test", 800, 600, 0);
-  CHECK(ctx == NULL, "dpyinit should return NULL when Wayland is unavailable");
+  wlctx *ctx = NULL;
+  int rc = dpyinit((dpyctx **)&ctx, "test", 800, 600, 0);
+  CHECK(rc < 0, "dpyinit should return <0 when Wayland is unavailable");
 
   // Restore: unset so later tests are not affected
   unsetenv("WAYLAND_DISPLAY");
