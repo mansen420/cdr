@@ -13,11 +13,19 @@ struct replctx
   volatile int quit;
 };
 
+static void term(replctx *ctx)
+{
+  if(!ctx) return;
+  if(ctx->sc) free(ctx->sc);
+  free(ctx);
+}
+
 static replctx *init(gfxctx *gfx)
 {
+  replctx *ctx= NULL;
   if(!gfx) goto err;
 
-  replctx *ctx= calloc(1, sizeof *ctx);
+  ctx= calloc(1, sizeof *ctx);
   if(!ctx) goto err;
 
   ctx->sc= s7_init();
@@ -27,14 +35,8 @@ static replctx *init(gfxctx *gfx)
 
   return ctx;
 err:
+  term(ctx);
   return NULL;
-}
-
-static void term(replctx *ctx)
-{
-  if(!ctx) return;
-  if(ctx->sc) free(ctx->sc);
-  free(ctx);
 }
 
 static void loop(replctx *ctx)
