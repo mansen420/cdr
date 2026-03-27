@@ -9,7 +9,8 @@
 #include <unistd.h>
 
 static volatile int quit= 0;
-static void         on_close(void *u)
+
+static void on_close(void *u)
 {
   (void)u;
   quit= 1;
@@ -55,7 +56,12 @@ int main(int argc, char **argv)
 
   if(replinit(&repl, gfx) < 0) goto exit;
 
-  reploop(repl);
+  while(!quit)
+  {
+		dpypoll(dpy);
+    if(gfxrender(gfx) < 0) break;
+  }
+  // reploop(repl);
 
   rc= 0;
 exit:

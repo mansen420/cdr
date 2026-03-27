@@ -10,7 +10,7 @@ loop and render loop. The two cannot share the same thread.
 **Location:** `src/main.c` — `reploop(repl)` is called before any render loop.
 
 **Fix direction:** Run the REPL on a background thread (as was done before
-`main.c` was separated out). `pthread_create` → `reploop` on worker thread,
+`main.c` was separated out). `pthread_create` -> `reploop` on worker thread,
 main thread owns `dpypoll` + `gfxrender`.
 
 ---
@@ -29,3 +29,18 @@ functions. The FFI layer has not been written yet.
 handing off to `s7_repl()`. Engine context (`gfxctx *`) can be passed through
 a file-scope pointer since it is a singleton.
 
+---
+
+## Implement gfxinit_vtxbuf / gfxinit_img
+
+Opaque handles `gfxbuf` and `gfximg` are declared in `graphics.h` along with
+their creation/destruction signatures, but have no backing implementation in
+`vulkan.c`. Needs internal struct definitions and Vulkan resource creation.
+
+---
+
+## Implement gfxpass
+
+The render pass abstraction that bundles a vertex buffer, pipeline, and
+input/output images into a single draw unit. Depends on `gfxbuf`, `gfximg`,
+and `gfxppl` being implemented first.
