@@ -11,13 +11,13 @@ typedef struct dpyctx dpyctx;
 
 dpyctx *dpyinit(const char *title, unsigned width, unsigned height, u32 flags);
 
-int         dpygeterr(dpyctx *);
-const char *dpyerrstr(DPYERR);
+int         dpyget_err(dpyctx *);
+const char *dpyget_errstr(DPYERR);
 
 // get native window handle
-void *dpygetnwin(dpyctx *);
+void *dpyget_nwin(dpyctx *);
 // get native instance handle
-void *dpygetncon(dpyctx *);
+void *dpyget_ncon(dpyctx *);
 
 int dpypoll(dpyctx *);
 
@@ -26,8 +26,8 @@ void dpyterm(dpyctx *);
 typedef void (*resizefn_t)(i32, i32, void *);
 typedef void (*closefn_t)(void *);
 
-void dpysetusrdata(dpyctx *, void *);
-void dpysetrszcb(dpyctx *, resizefn_t);
-void dpysetclscb(dpyctx *, closefn_t);
+void dpyset_usrdata(dpyctx *, void *);
+void dpyset_onrsz(dpyctx *, resizefn_t);
+void dpyset_onclose(dpyctx *, closefn_t);
 
-int dpyinit_q(dpyctx *);
+int dpyqry_init(dpyctx *);

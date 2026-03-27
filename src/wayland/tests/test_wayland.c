@@ -28,33 +28,33 @@ static int tests_failed = 0;
   } while(0)
 
 // ---------------------------------------------------------------------------
-// dpyinit_q
+// dpyqry_init
 // ---------------------------------------------------------------------------
 
-static void test_dpyinit_q_null(void)
+static void test_dpyqry_init_null(void)
 {
   // NULL pointer must return 0 (not crash)
-  int result = dpyinit_q(NULL);
-  CHECK(result == 0, "dpyinit_q(NULL) should return 0");
+  int result = dpyqry_init(NULL);
+  CHECK(result == 0, "dpyqry_init(NULL) should return 0");
 }
 
-static void test_dpyinit_q_zeroed_struct(void)
+static void test_dpyqry_init_zeroed_struct(void)
 {
-  // A zeroed wlctx has alive==0, so dpyinit_q must return 0
+  // A zeroed wlctx has alive==0, so dpyqry_init must return 0
   wlctx ctx;
   memset(&ctx, 0, sizeof ctx);
-  int result = dpyinit_q((dpyctx *)&ctx);
-  CHECK(result == 0, "dpyinit_q on zeroed struct should return 0 (alive==0)");
+  int result = dpyqry_init((dpyctx *)&ctx);
+  CHECK(result == 0, "dpyqry_init on zeroed struct should return 0 (alive==0)");
 }
 
-static void test_dpyinit_q_alive_set(void)
+static void test_dpyqry_init_alive_set(void)
 {
-  // When alive is non-zero dpyinit_q must return non-zero
+  // When alive is non-zero dpyqry_init must return non-zero
   wlctx ctx;
   memset(&ctx, 0, sizeof ctx);
   ctx.alive = 1;
-  int result = dpyinit_q((dpyctx *)&ctx);
-  CHECK(result != 0, "dpyinit_q should return non-zero when alive==1");
+  int result = dpyqry_init((dpyctx *)&ctx);
+  CHECK(result != 0, "dpyqry_init should return non-zero when alive==1");
 }
 
 // ---------------------------------------------------------------------------
@@ -210,9 +210,9 @@ static void test_toplvlcnf_null_data(void)
 
 int main(void)
 {
-  test_dpyinit_q_null();
-  test_dpyinit_q_zeroed_struct();
-  test_dpyinit_q_alive_set();
+  test_dpyqry_init_null();
+  test_dpyqry_init_zeroed_struct();
+  test_dpyqry_init_alive_set();
 
   test_dpyinit_no_compositor();
 

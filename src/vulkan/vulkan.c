@@ -49,8 +49,8 @@ vkctx *init(void *dpy)
   {
     VkWaylandSurfaceCreateInfoKHR info= {
       .sType  = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
-      .display= dpygetncon(dpy),
-      .surface= dpygetnwin(dpy),
+      .display= dpyget_ncon(dpy),
+      .surface= dpyget_nwin(dpy),
     };
     VkResult res= vkCreateWaylandSurfaceKHR(ctx->inst, &info, NULL, &ctx->surf);
     OK(res, goto err;)
@@ -490,7 +490,7 @@ err:
 
 gfxctx *gfxinit(dpyctx *dpy) { return init(dpy); }
 void    gfxterm(gfxctx *ctx) { term(ctx); }
-int     gfxinit_q(gfxctx *ctx) { return ctx && ctx->alive; }
+int     gfxqry_init(gfxctx *ctx) { return ctx && ctx->alive; }
 void    gfxpause(gfxctx *ctx) { ctx->pause= 1; }
 void    gfxresume(gfxctx *ctx) { ctx->pause= 0; }
 int     gfxrender(gfxctx *ctx) { return render(ctx); }

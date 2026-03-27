@@ -29,33 +29,33 @@ static int tests_failed = 0;
   } while(0)
 
 // ---------------------------------------------------------------------------
-// gfxinit_q
+// gfxqry_init
 // ---------------------------------------------------------------------------
 
-static void test_gfxinit_q_null(void)
+static void test_gfxqry_init_null(void)
 {
   // NULL must return 0 and must not crash
-  int result = gfxinit_q(NULL);
-  CHECK(result == 0, "gfxinit_q(NULL) should return 0");
+  int result = gfxqry_init(NULL);
+  CHECK(result == 0, "gfxqry_init(NULL) should return 0");
 }
 
-static void test_gfxinit_q_zeroed_struct(void)
+static void test_gfxqry_init_zeroed_struct(void)
 {
-  // A zeroed vkctx has alive==0, so gfxinit_q must return 0
+  // A zeroed vkctx has alive==0, so gfxqry_init must return 0
   vkctx ctx;
   memset(&ctx, 0, sizeof ctx);
-  int result = gfxinit_q((gfxctx *)&ctx);
-  CHECK(result == 0, "gfxinit_q on zeroed vkctx should return 0 (alive==0)");
+  int result = gfxqry_init((gfxctx *)&ctx);
+  CHECK(result == 0, "gfxqry_init on zeroed vkctx should return 0 (alive==0)");
 }
 
-static void test_gfxinit_q_alive_set(void)
+static void test_gfxqry_init_alive_set(void)
 {
-  // When alive is non-zero gfxinit_q must return non-zero
+  // When alive is non-zero gfxqry_init must return non-zero
   vkctx ctx;
   memset(&ctx, 0, sizeof ctx);
   ctx.alive = 1;
-  int result = gfxinit_q((gfxctx *)&ctx);
-  CHECK(result != 0, "gfxinit_q should return non-zero when alive==1");
+  int result = gfxqry_init((gfxctx *)&ctx);
+  CHECK(result != 0, "gfxqry_init should return non-zero when alive==1");
 }
 
 // ---------------------------------------------------------------------------
@@ -309,10 +309,10 @@ static void test_updata_direct_wrong_flags(void)
 
 int main(void)
 {
-  // gfxinit_q
-  test_gfxinit_q_null();
-  test_gfxinit_q_zeroed_struct();
-  test_gfxinit_q_alive_set();
+  // gfxqry_init
+  test_gfxqry_init_null();
+  test_gfxqry_init_zeroed_struct();
+  test_gfxqry_init_alive_set();
 
   // alignup
   test_alignup_already_aligned();

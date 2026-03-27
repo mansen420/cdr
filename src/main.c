@@ -33,13 +33,17 @@ int main(int argc, char **argv)
   {
     usize       nrbytes= 0;
     const char *path   = argc > 1 ? argv[1] : "./assets/shader.spv";
-    int         fd     = open(path, O_RDONLY);
+
+    int fd= open(path, O_RDONLY);
     if(fd == -1) goto exit;
+
     struct stat st;
     fstat(fd, &st);
     nrbytes= st.st_size;
-    spv    = malloc(nrbytes);
+
+    spv= malloc(nrbytes);
     read(fd, spv, nrbytes);
+
     close(fd);
 
     if(gfxprep(gfx, spv, nrbytes) < 0) goto exit;
@@ -47,9 +51,9 @@ int main(int argc, char **argv)
     spv= NULL;
   }
 
-  dpysetrszcb(dpy, on_resize);
-  dpysetclscb(dpy, on_close);
-  dpysetusrdata(dpy, gfx);
+  dpyset_onrsz(dpy, on_resize);
+  dpyset_onclose(dpy, on_close);
+  dpyset_usrdata(dpy, gfx);
 
   repl= replinit(gfx);
   if(!repl) goto exit;

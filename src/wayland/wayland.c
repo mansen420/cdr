@@ -90,9 +90,9 @@ void xdgping_h(void *data, struct xdg_wm_base *xdg_wm_base, uint32_t serial)
   xdg_wm_base_pong(xdg_wm_base, serial);
 }
 
-void *dpygetnwin(wlctx *ctx) { return ctx->surf; }
-void *dpygetncon(wlctx *ctx) { return ctx->disp; }
-int   dpyinit_q(dpyctx *ctx) { return ctx && ctx->alive; }
+void *dpyget_nwin(wlctx *ctx) { return ctx->surf; }
+void *dpyget_ncon(wlctx *ctx) { return ctx->disp; }
+int   dpyqry_init(dpyctx *ctx) { return ctx && ctx->alive; }
 
 wlctx *dpyinit(const char *title, unsigned w, unsigned h, u32 flags)
 {
@@ -166,9 +166,9 @@ int dpypoll(dpyctx *ctx)
   return 0;
 }
 
-void dpysetusrdata(dpyctx *ctx, void *usr) { ctx->usrdata= usr; }
-void dpysetrszcb(dpyctx *ctx, resizefn_t cb) { ctx->rszcb= cb; }
-void dpysetclscb(dpyctx *ctx, closefn_t cb) { ctx->clscb= cb; }
+void dpyset_usrdata(dpyctx *ctx, void *usr) { ctx->usrdata= usr; }
+void dpyset_onrsz(dpyctx *ctx, resizefn_t cb) { ctx->rszcb= cb; }
+void dpyset_onclose(dpyctx *ctx, closefn_t cb) { ctx->clscb= cb; }
 
 #undef OK
 #undef NNUL
