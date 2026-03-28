@@ -156,7 +156,7 @@ static i64      arena_suballoc(vkarena *arena, usize bytes, usize align);
 static i64      memalloc(vkctx *ctx, vkarena *arena, VkBuffer buf);
 static usize    alignup(usize addr, usize align);
 static VkBuffer updata_direct(
-  vkctx *ctx, vkarena *rbar, const void *data, usize bytes);
+  vkctx *ctx, vkarena *mem, const void *data, usize bytes);
 static VkBuffer updata_staged(
   vkctx *ctx, vkarena *host, vkarena *dev, const void *data, usize bytes);
 

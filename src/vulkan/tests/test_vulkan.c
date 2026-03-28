@@ -286,14 +286,15 @@ static void test_updata_direct_null_data(void)
 
 static void test_updata_direct_wrong_flags(void)
 {
-  // Arena is HOST_VISIBLE only — not rBAR (missing DEVICE_LOCAL)
+  // Arena is DEVICE_LOCAL only — not host-visible, cannot map
   vkctx    ctx = {0};
   vkarena  arena= {0};
-  arena.flags   = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+  arena.flags   = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
   arena.size    = 1024;
   u8       data = 0;
   VkBuffer buf  = updata_direct(&ctx, &arena, &data, sizeof data);
-  CHECK(buf == VKNULL, "updata_direct with non-rBAR arena must return VKNULL");
+  CHECK(buf == VKNULL,
+        "updata_direct with non-host-visible arena must return VKNULL");
 }
 
 // ---------------------------------------------------------------------------

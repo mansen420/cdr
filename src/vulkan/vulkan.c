@@ -319,17 +319,22 @@ static int init(vkctx **out, void *dpy, gfxdesc desc)
       ctx->prscmdpool= VKNULL;
   }
 
+  // XXX: duplicated rBAR-then-fallback logic with init_mem — extract helper
   // default memory pool
-  if(desc.devmem)
+  if(desc.devmem.bytes)
   {
     VkMemoryPropertyFlags rbar_flags=
       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    VkMemoryPropertyFlags fallback=
+      (desc.devmem.flags & GFXMEM_MAPPED)
+        ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        : VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-    if(arenainit(&ctx->dfltpool, ctx, desc.devmem, rbar_flags) < 0)
-      OK(arenainit(&ctx->dfltpool, ctx, desc.devmem,
-                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
+    if(arenainit(&ctx->dfltpool, ctx, desc.devmem.bytes, rbar_flags) < 0)
+      OK(arenainit(&ctx->dfltpool, ctx, desc.devmem.bytes, fallback),
          goto err;)
   }
 
@@ -503,8 +508,10 @@ err:
   return -1;
 }
 
-int  gfxinit(gfxctx **out, dpyctx *dpy, gfxdesc desc)
-{ return init(out, dpy, desc); }
+int gfxinit(gfxctx **out, dpyctx *dpy, gfxdesc desc)
+{
+  return init(out, dpy, desc);
+}
 void gfxterm(gfxctx *ctx) { term(ctx); }
 int  gfxqry_init(gfxctx *ctx) { return ctx && ctx->alive; }
 void gfxpause(gfxctx *ctx) { ctx->pause= 1; }
@@ -530,9 +537,9 @@ static void term_vtxbuf(gfxctx *ctx, gfxbuf *buf)
 
 static VkBuffer updata(vkctx *ctx, vkarena *dev, void *data, usize bytes)
 {
-  vkarena host= {0};
-  int     has_host= 0;
-  VkBuffer buf= VKNULL;
+  vkarena  host    = {0};
+  int      has_host= 0;
+  VkBuffer buf     = VKNULL;
 
   if(!ctx || !dev || !data) goto err;
   if(!bytes) goto exit;
@@ -546,7 +553,7 @@ static VkBuffer updata(vkctx *ctx, vkarena *dev, void *data, usize bytes)
     OK(arenainit(&host, ctx, bytes, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT),
        goto err;)
     has_host= 1;
-    buf= updata_staged(ctx, &host, dev, data, bytes);
+    buf     = updata_staged(ctx, &host, dev, data, bytes);
   }
 exit:
   if(has_host) arenaterm(ctx, &host);
@@ -579,13 +586,16 @@ err:
 
 int gfxinit_vtxbuf(
   gfxbuf **o, gfxctx *c, gfxmem *m, gfxdesc_vtxbuf d, const void *data)
-{ return init_vtxbuf(o, c, m, d, data); }
+{
+  return init_vtxbuf(o, c, m, d, data);
+}
 void gfxterm_vtxbuf(gfxctx *c, gfxbuf *b) { term_vtxbuf(c, b); }
 
-static int init_mem(gfxmem **out, vkctx *ctx, usize bytes)
+// XXX: duplicated rBAR-then-fallback logic with init — extract helper
+static int init_mem(gfxmem **out, vkctx *ctx, gfxdesc_mem desc)
 {
   gfxmem *mem= NULL;
-  if(!out || !ctx || !bytes) goto err;
+  if(!out || !ctx || !desc.bytes) goto err;
 
   mem= calloc(1, sizeof *mem);
   if(!mem) goto err;
@@ -594,10 +604,14 @@ static int init_mem(gfxmem **out, vkctx *ctx, usize bytes)
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  VkMemoryPropertyFlags fallback=
+    (desc.flags & GFXMEM_MAPPED)
+      ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+      : VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-  if(arenainit(mem, ctx, bytes, rbar_flags) < 0)
-    OK(arenainit(mem, ctx, bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
-       goto err;)
+  if(arenainit(mem, ctx, desc.bytes, rbar_flags) < 0)
+    OK(arenainit(mem, ctx, desc.bytes, fallback), goto err;)
 
   *out= mem;
   return 0;
@@ -613,8 +627,10 @@ static void term_mem(vkctx *ctx, gfxmem *mem)
   free(mem);
 }
 
-int  gfxinit_mem(gfxmem **o, gfxctx *c, usize bytes)
-{ return init_mem(o, c, bytes); }
+int gfxinit_mem(gfxmem **o, gfxctx *c, gfxdesc_mem d)
+{
+  return init_mem(o, c, d);
+}
 void gfxterm_mem(gfxctx *c, gfxmem *m) { term_mem(c, m); }
 
 static int init_frame(vkctx *ctx)
@@ -1144,15 +1160,14 @@ err:
   if(buf) vkDestroyBuffer(ctx->dev, buf, NULL);
   return VKNULL;
 }
-static VkBuffer updata_direct(vkctx *ctx, vkarena *rbar, const void *data, usize bytes)
+static VkBuffer updata_direct(
+  vkctx *ctx, vkarena *mem, const void *data, usize bytes)
 {
-  VkMemoryPropertyFlags flags=
-    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-
   VkBuffer buf= VKNULL;
   VkResult res;
 
-  if(!ctx || !data || ((rbar->flags & flags) != flags)) goto err;
+  if(!ctx || !ctx->dev || !data ||
+     !(mem->flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) goto err;
 
   VkBufferCreateInfo info= {
     .sType      = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -1162,14 +1177,14 @@ static VkBuffer updata_direct(vkctx *ctx, vkarena *rbar, const void *data, usize
   res= vkCreateBuffer(ctx->dev, &info, NULL, &buf);
   OK(res, goto err;)
 
-  i64 offset= memalloc(ctx, rbar, buf);
+  i64 offset= memalloc(ctx, mem, buf);
   if(offset < 0) goto err;
 
   void *mapped;
-  res= vkMapMemory(ctx->dev, rbar->data, (usize)offset, bytes, 0, &mapped);
+  res= vkMapMemory(ctx->dev, mem->data, (usize)offset, bytes, 0, &mapped);
   OK(res, goto err;)
   memcpy(mapped, data, bytes);
-  vkUnmapMemory(ctx->dev, rbar->data);
+  vkUnmapMemory(ctx->dev, mem->data);
 
   return buf;
 err:
@@ -1235,7 +1250,8 @@ static void printmeminfo(const vkctx *ctx)
     putchar('\n');
   }
 }
-static void printarenainfo(const vkctx *ctx, const vkarena *arena, const char *name)
+static void printarenainfo(
+  const vkctx *ctx, const vkarena *arena, const char *name)
 {
   VkPhysicalDeviceMemoryProperties props;
   vkGetPhysicalDeviceMemoryProperties(ctx->gpu, &props);
