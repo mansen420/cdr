@@ -90,28 +90,18 @@ typedef struct
 int gfxrender(gfxctx *, gfxpass *, u32 nrpasses);
 
 // -- memory -------------------------------------------------------------------
-enum
-{
-  GFXMEM_MAPPED = 1 << 0,
-};
-
 typedef struct
 {
-  usize bytes;
+  usize devmem;
+  usize hostmem;
+  u32   nrframes;
+  gfxfmt_img swpfmt;
   u32   flags;
-} gfxdesc_mem;
-
-typedef struct
-{
-  gfxdesc_mem devmem;
-  usize       hostmem;
-  u32         nrframes;
-  gfxfmt_img  swpfmt;
-  u32         flags;
 } gfxdesc;
 
-int  gfxinit_mem(gfxmem **, gfxctx *, gfxdesc_mem);
-void gfxterm_mem(gfxctx *, gfxmem *);
+int   gfxinit_mem(gfxmem **, gfxctx *, usize bytes);
+int   gfxinit_mapped(gfxmem **, gfxctx *, usize bytes, void **ptr);
+void  gfxterm_mem(gfxctx *, gfxmem *);
 
 // -- context ------------------------------------------------------------------
 int  gfxinit(gfxctx **, dpyctx *, gfxdesc);
