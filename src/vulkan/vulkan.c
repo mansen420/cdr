@@ -323,19 +323,16 @@ static int init(vkctx **out, void *dpy, gfxdesc desc)
   // default memory pool
   if(desc.devmem.bytes)
   {
-    VkMemoryPropertyFlags rbar_flags=
-      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    VkMemoryPropertyFlags fallback=
-      (desc.devmem.flags & GFXMEM_MAPPED)
-        ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-        : VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    VkMemoryPropertyFlags rbar_flags= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    VkMemoryPropertyFlags fallback  = (desc.devmem.flags & GFXMEM_MAPPED)
+                                        ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+                                        : VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
     if(arenainit(&ctx->dfltpool, ctx, desc.devmem.bytes, rbar_flags) < 0)
-      OK(arenainit(&ctx->dfltpool, ctx, desc.devmem.bytes, fallback),
-         goto err;)
+      OK(arenainit(&ctx->dfltpool, ctx, desc.devmem.bytes, fallback), goto err;)
   }
 
   ctx->alive= 1;
@@ -600,15 +597,13 @@ static int init_mem(gfxmem **out, vkctx *ctx, gfxdesc_mem desc)
   mem= calloc(1, sizeof *mem);
   if(!mem) goto err;
 
-  VkMemoryPropertyFlags rbar_flags=
-    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-  VkMemoryPropertyFlags fallback=
-    (desc.flags & GFXMEM_MAPPED)
-      ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-      : VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+  VkMemoryPropertyFlags rbar_flags= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  VkMemoryPropertyFlags fallback  = (desc.flags & GFXMEM_MAPPED)
+                                      ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+                                      : VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
   if(arenainit(mem, ctx, desc.bytes, rbar_flags) < 0)
     OK(arenainit(mem, ctx, desc.bytes, fallback), goto err;)
@@ -1166,8 +1161,10 @@ static VkBuffer updata_direct(
   VkBuffer buf= VKNULL;
   VkResult res;
 
-  if(!ctx || !ctx->dev || !data ||
-     !(mem->flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) goto err;
+  if(
+    !ctx || !ctx->dev || !data ||
+    !(mem->flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
+    goto err;
 
   VkBufferCreateInfo info= {
     .sType      = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
