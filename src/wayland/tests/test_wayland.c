@@ -1,18 +1,12 @@
 // AI-generated (Claude)
-// Compile: gcc src/wayland/wayland.c src/wayland/xdg-shell-client-protocol.c \
+// Compile: gcc src/wayland/xdg-shell-client-protocol.c \
 //              src/wayland/tests/test_wayland.c \
 //              -I. -lwayland-client -o wayland_test
 // Run:     ./wayland_test
 
-#define _GNU_SOURCE
+#include "src/wayland/wayland.c"
 
 #include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include "include/defs.h"
-#include "src/wayland/wayland.h"
 
 static int tests_run    = 0;
 static int tests_failed = 0;

@@ -10,7 +10,7 @@
 
 static const char *const VK_LAYER_VALID_NAME= "VK_LAYER_KHRONOS_validation";
 
-int init(vkctx **out, void *dpy)
+static int init(vkctx **out, void *dpy)
 {
   vkctx *ctx= calloc(1, sizeof *ctx);
 
@@ -320,7 +320,7 @@ int init(vkctx **out, void *dpy)
   }
 
   ctx->alive= 1;
-  *out= ctx;
+  *out      = ctx;
   return 0;
 err:
   gfxterm(ctx);
@@ -328,7 +328,7 @@ err:
   return -1;
 }
 
-void frmterm(vkctx *ctx, u32 idx)
+static void frmterm(vkctx *ctx, u32 idx)
 {
   if(idx >= ctx->nrframes) goto err;
 
@@ -342,7 +342,7 @@ err:
   return;
 }
 
-void term(vkctx *ctx)
+static void term(vkctx *ctx)
 {
   if(!ctx) return;
   vkDeviceWaitIdle(ctx->dev);
@@ -367,7 +367,7 @@ void term(vkctx *ctx)
   free(ctx);
 }
 
-int initgfxppl(vkctx *ctx, const u32 *shcode, u32 shlen)
+static int initgfxppl(vkctx *ctx, const u32 *shcode, u32 shlen)
 {
   if(!ctx || !shcode) goto err;
   // shader
@@ -402,16 +402,16 @@ int initgfxppl(vkctx *ctx, const u32 *shcode, u32 shlen)
     .stride   = sizeof(vertex),
     .inputRate= VK_VERTEX_INPUT_RATE_VERTEX};
   VkVertexInputAttributeDescription attrs[2];
-  attrs[0]=
-    (VkVertexInputAttributeDescription){.location= 0,
-                                        .binding = 0,
-                                        .format  = VK_FORMAT_R32G32_SFLOAT,
-                                        offsetof(vertex, pos)};
-  attrs[1]=
-    (VkVertexInputAttributeDescription){.location= 1,
-                                        .binding = 0,
-                                        .format  = VK_FORMAT_R32G32B32_SFLOAT,
-                                        offsetof(vertex, color)};
+  attrs[0]= (VkVertexInputAttributeDescription){
+    .location= 0,
+    .binding = 0,
+    .format  = VK_FORMAT_R32G32_SFLOAT,
+    offsetof(vertex, pos)};
+  attrs[1]= (VkVertexInputAttributeDescription){
+    .location= 1,
+    .binding = 0,
+    .format  = VK_FORMAT_R32G32B32_SFLOAT,
+    offsetof(vertex, color)};
 
   VkPipelineVertexInputStateCreateInfo inputinfo= {
     .sType= VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -489,19 +489,94 @@ err:
   return -1;
 }
 
-int     gfxinit(gfxctx **out, dpyctx *dpy) { return init(out, dpy); }
-void    gfxterm(gfxctx *ctx) { term(ctx); }
-int     gfxqry_init(gfxctx *ctx) { return ctx && ctx->alive; }
-void    gfxpause(gfxctx *ctx) { ctx->pause= 1; }
-void    gfxresume(gfxctx *ctx) { ctx->pause= 0; }
-int     gfxrender(gfxctx *ctx) { return render(ctx); }
-void    gfxupdate(gfxctx *ctx, i32 w, i32 h)
+int  gfxinit(gfxctx **out, dpyctx *dpy) { return init(out, dpy); }
+void gfxterm(gfxctx *ctx) { term(ctx); }
+int  gfxqry_init(gfxctx *ctx) { return ctx && ctx->alive; }
+void gfxpause(gfxctx *ctx) { ctx->pause= 1; }
+void gfxresume(gfxctx *ctx) { ctx->pause= 0; }
+int  gfxrender(gfxctx *ctx, gfxpass *passes, u32 nrpasses)
+{
+  (void)passes;
+  (void)nrpasses;
+  return render(ctx);
+}
+void gfxupdate(gfxctx *ctx, i32 w, i32 h)
 {
   vkDeviceWaitIdle(ctx->dev);
   reinitswp(ctx, w, h);
 }
 
-int frminit(vkctx *ctx)
+static void term_vtxbuf(gfxctx *ctx, gfxbuf *buf)
+{
+  if(!ctx || !buf) return;
+  if(buf->buf) vkDestroyBuffer(ctx->dev, buf->buf, NULL);
+  free(buf);
+}
+
+static VkBuffer updata(vkctx *ctx, void *data, usize bytes)
+{
+  vkarena *mem_host= NULL, *mem_dev= NULL, *mem_rbar= NULL;
+	VkBuffer buf= VKNULL;
+
+	if(!ctx || !data) goto err;
+	if(!bytes) goto exit;
+
+  mem_rbar= arenainit(
+    ctx,
+    0,
+    bytes,
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+  if(!mem_rbar)  // staging
+  {
+    mem_host= arenainit(ctx, 0, bytes, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    NNUL(mem_host, goto err;)
+
+    mem_dev= arenainit(ctx, 1, bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    NNUL(mem_dev, goto err;)
+  }
+
+  if(mem_rbar)
+    buf= updata_direct(ctx, mem_rbar, data, bytes);
+  else
+    buf= updata_staged(ctx, mem_host, mem_dev, data, bytes);
+exit:
+  arenaterm(
+    ctx, mem_host);  // staging only — device arenas persist until gfxterm
+  return buf;
+err:
+  arenaterm(ctx, mem_dev);
+  arenaterm(ctx, mem_host);
+  arenaterm(ctx, mem_rbar);
+  return VKNULL;
+}
+
+static int init_vtxbuf(gfxbuf **out, gfxctx *ctx, gfxdesc_vtxbuf desc, const void *data)
+{
+  gfxbuf *buf= NULL;
+  if(!ctx || !data) goto err;
+
+  buf= calloc(1, sizeof *buf);
+  if(!buf) goto err;
+
+  buf->buf= updata(ctx, (void *)data, (usize)desc.nrvtx * desc.vtxstride);
+  if(!buf->buf) goto err;
+
+  buf->desc= desc;
+
+  *out= buf;
+  return 0;
+err:
+  term_vtxbuf(ctx, buf);
+  return -1;
+}
+
+int  gfxinit_vtxbuf(gfxbuf **o, gfxctx *c, gfxdesc_vtxbuf d, const void *data)
+{ return init_vtxbuf(o, c, d, data); }
+void gfxterm_vtxbuf(gfxctx *c, gfxbuf *b) { term_vtxbuf(c, b); }
+
+static int frminit(vkctx *ctx)
 {
   if(!ctx) goto err;
 
@@ -538,7 +613,7 @@ err:
 }
 
 // caller must synchronise
-int reinitswp(vkctx *ctx, i32 w_new, i32 h_new)
+static int reinitswp(vkctx *ctx, i32 w_new, i32 h_new)
 {
   if(!ctx) goto err;
 
@@ -656,7 +731,7 @@ err:
   return -1;
 }
 
-int render(vkctx *ctx)
+static int render(vkctx *ctx)
 {
   if(ctx->pause) return 0;
 
@@ -673,22 +748,23 @@ int render(vkctx *ctx)
     clock_gettime(CLOCK_MONOTONIC, &t_now);
     if(ctx->diag_t_last.tv_sec || ctx->diag_t_last.tv_nsec)
     {
-      u64 delta_ns= (u64)(t_now.tv_sec - ctx->diag_t_last.tv_sec) * 1000000000ULL +
-                    (u64)(t_now.tv_nsec - ctx->diag_t_last.tv_nsec);
+      u64 delta_ns=
+        (u64)(t_now.tv_sec - ctx->diag_t_last.tv_sec) * 1000000000ULL +
+        (u64)(t_now.tv_nsec - ctx->diag_t_last.tv_nsec);
       ctx->diag_acc_ns+= delta_ns;
       ctx->diag_acc_count++;
       if(ctx->diag_acc_ns >= PRINT_INTERVAL_NS)
       {
         double avg_ms = (double)ctx->diag_acc_ns / ctx->diag_acc_count / 1e6;
         double avg_fps= 1e9 / ((double)ctx->diag_acc_ns / ctx->diag_acc_count);
-				// comment out the print. later just write this to some frame diagnostics
-				// struct
-        //printf( 
-        //  "frame=%-6u  ft=%-4.3fms  fps=%-8.1f\r",
-        //  ctx->absfrmidx,
-        //  avg_ms,
-        //  avg_fps);
-        //fflush(stdout);
+        // comment out the print. later just write this to some frame
+        // diagnostics struct
+        // printf(
+        //   "frame=%-6u  ft=%-4.3fms  fps=%-8.1f\r",
+        //   ctx->absfrmidx,
+        //   avg_ms,
+        //   avg_fps);
+        // fflush(stdout);
         ctx->diag_acc_ns   = 0;
         ctx->diag_acc_count= 0;
       }
@@ -826,7 +902,7 @@ err:
   return -1;
 }
 
-vkarena *arenainit(
+static vkarena *arenainit(
   vkctx *ctx, u32 idx, usize bytes, VkMemoryPropertyFlags flags)
 {
   if(!ctx || idx >= 32) goto err;
@@ -871,11 +947,11 @@ err:
   return NULL;
 }
 
-usize alignup(usize addr, usize align)
+static usize alignup(usize addr, usize align)
 {
   return (addr + align - 1) & ~(align - 1);
 }
-i64 arena_suballoc(vkarena *arena, usize bytes, usize align)
+static i64 arena_suballoc(vkarena *arena, usize bytes, usize align)
 {
   if(!arena) goto err;
 
@@ -897,7 +973,7 @@ i64 arena_suballoc(vkarena *arena, usize bytes, usize align)
 err:
   return -1;
 }
-i64 memalloc(vkctx *ctx, vkarena *arena, VkBuffer buf)
+static i64 memalloc(vkctx *ctx, vkarena *arena, VkBuffer buf)
 {
   if(!ctx || !arena || !buf) return -1;
 
@@ -923,19 +999,19 @@ i64 memalloc(vkctx *ctx, vkarena *arena, VkBuffer buf)
   return offset;
 }
 
-void arenaclear(vkarena *arena)
+static void arenaclear(vkarena *arena)
 {
   arena->offset= 0;
   arena->slop  = 0;
 }
-void arenaterm(vkctx *ctx, vkarena *arena)
+static void arenaterm(vkctx *ctx, vkarena *arena)
 {
   if(!arena || !ctx) return;
   if(arena->data) vkFreeMemory(ctx->dev, arena->data, NULL);
   memset(arena, 0, sizeof *arena);
 }
 
-VkBuffer updata_staged(
+static VkBuffer updata_staged(
   vkctx *ctx, vkarena *host, vkarena *dev, const void *data, usize bytes)
 {
   // function scope
@@ -1029,7 +1105,7 @@ err:
   if(buf) vkDestroyBuffer(ctx->dev, buf, NULL);
   return VKNULL;
 }
-VkBuffer updata_direct(vkctx *ctx, vkarena *rbar, const void *data, usize bytes)
+static VkBuffer updata_direct(vkctx *ctx, vkarena *rbar, const void *data, usize bytes)
 {
   VkMemoryPropertyFlags flags=
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
@@ -1064,51 +1140,52 @@ err:
 
 int gfxprep(gfxctx *ctx, const u32 *spv, usize nrbytes)
 {
-	if(!ctx || !spv || !nrbytes) goto err;
-	// upload
-	{
-		vkarena *mem_host= NULL, *mem_dev= NULL,
-						*mem_rbar= arenainit(
-							ctx,
-							0,
-							10 * MB,
-							VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-								VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-								VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-		if(!mem_rbar)  // staging
-		{
-			mem_host= arenainit(ctx, 0, 2 * MB, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-			NNUL(mem_host, goto err;)
+  if(!ctx || !spv || !nrbytes) goto err;
+  // upload
+  {
+    vkarena *mem_host= NULL, *mem_dev= NULL,
+            *mem_rbar= arenainit(
+              ctx,
+              0,
+              10 * MB,
+              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if(!mem_rbar)  // staging
+    {
+      mem_host= arenainit(ctx, 0, 2 * MB, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+      NNUL(mem_host, goto err;)
 
-			mem_dev= arenainit(ctx, 1, 10 * MB, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-			NNUL(mem_dev, goto err;)
-		}
+      mem_dev= arenainit(ctx, 1, 10 * MB, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+      NNUL(mem_dev, goto err;)
+    }
 
-		vertex triangle[3]= {
-			{.pos= {.x= 0.0f, .y= -0.5f}, .color= {.r= 1.f, .g= 0.f, .b= 0.f}},
-			{.pos= {.x= 0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 1.f, .b= 0.f}},
-			{.pos= {.x= -0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 0.f, .b= 1.f}}};
-		
-		if(mem_rbar)
-			ctx->vtxbuf= updata_direct(ctx, mem_rbar, triangle, sizeof triangle);
-		else
-			ctx->vtxbuf= updata_staged(ctx, mem_host, mem_dev, triangle, sizeof triangle);
+    vertex triangle[3]= {
+      {.pos= {.x= 0.0f, .y= -0.5f}, .color= {.r= 1.f, .g= 0.f, .b= 0.f}},
+      {.pos= {.x= 0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 1.f, .b= 0.f}},
+      {.pos= {.x= -0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 0.f, .b= 1.f}}};
 
-		arenaterm(ctx, mem_host);  // staging only — device arenas persist until gfxterm
-	}
-	
-	NNUL(ctx->vtxbuf, goto err;)
-	// init
+    if(mem_rbar)
+      ctx->vtxbuf= updata_direct(ctx, mem_rbar, triangle, sizeof triangle);
+    else
+      ctx->vtxbuf=
+        updata_staged(ctx, mem_host, mem_dev, triangle, sizeof triangle);
+
+    arenaterm(
+      ctx, mem_host);  // staging only — device arenas persist until gfxterm
+  }
+
+  NNUL(ctx->vtxbuf, goto err;)
+  // init
   OK(initgfxppl(ctx, spv, nrbytes), goto err;)
   OK(frminit(ctx), goto err;)
 
-	return 0;
+  return 0;
 err:
-	return -1;
+  return -1;
 }
 
-
-void printmeminfo(const vkctx *ctx)
+static void printmeminfo(const vkctx *ctx)
 {
   VkPhysicalDeviceMemoryProperties props;
   vkGetPhysicalDeviceMemoryProperties(ctx->gpu, &props);
@@ -1144,7 +1221,7 @@ void printmeminfo(const vkctx *ctx)
     putchar('\n');
   }
 }
-void printarenainfo(const vkctx *ctx, const vkarena *arena, const char *name)
+static void printarenainfo(const vkctx *ctx, const vkarena *arena, const char *name)
 {
   VkPhysicalDeviceMemoryProperties props;
   vkGetPhysicalDeviceMemoryProperties(ctx->gpu, &props);

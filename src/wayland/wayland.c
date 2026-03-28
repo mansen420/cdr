@@ -17,7 +17,7 @@
     DO                                                            \
   }
 
-void toplvlcnf_h(
+static void toplvlcnf_h(
   void                *data,
   struct xdg_toplevel *xdg_toplevel,
   int32_t              width,
@@ -35,14 +35,14 @@ void toplvlcnf_h(
 
   if(ctx->rszcb) ctx->rszcb(w_new, h_new, ctx->usrdata);
 }
-void toplvlclose_h(void *data, struct xdg_toplevel *xdg_toplevel)
+static void toplvlclose_h(void *data, struct xdg_toplevel *xdg_toplevel)
 {
   NNUL(data, return;);
   wlctx *ctx= (wlctx *)data;
 
   if(ctx->clscb) ctx->clscb(ctx->usrdata);
 }
-void toplvlbounds_h(
+static void toplvlbounds_h(
   void *data, struct xdg_toplevel *xdg_toplevel, int32_t width, int32_t height)
 {
   NNUL(data, return;);
@@ -50,17 +50,17 @@ void toplvlbounds_h(
 
   if(width && height) ctx->w_max= width, ctx->h_max= height;
 }
-void toplvlcpb_h(
+static void toplvlcpb_h(
   void *data, struct xdg_toplevel *xdg_toplevel, struct wl_array *capabilities)
 {
   // no-op
 }
 
-void xdgsrf_h(void *data, struct xdg_surface *xdg_surface, uint32_t serial)
+static void xdgsrf_h(void *data, struct xdg_surface *xdg_surface, uint32_t serial)
 {
   xdg_surface_ack_configure(xdg_surface, serial);
 }
-void regobj_h(
+static void regobj_h(
   void               *data,
   struct wl_registry *wl_registry,
   uint32_t            name,
@@ -81,11 +81,11 @@ void regobj_h(
   }
 }
 // handle object removal
-void regobjr_h(void *data, struct wl_registry *wl_registry, uint32_t name)
+static void regobjr_h(void *data, struct wl_registry *wl_registry, uint32_t name)
 {
   // no-op
 }
-void xdgping_h(void *data, struct xdg_wm_base *xdg_wm_base, uint32_t serial)
+static void xdgping_h(void *data, struct xdg_wm_base *xdg_wm_base, uint32_t serial)
 {
   xdg_wm_base_pong(xdg_wm_base, serial);
 }

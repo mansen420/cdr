@@ -1,19 +1,12 @@
 // AI-generated (Claude)
-// Compile: gcc -DTESTING src/vulkan/vulkan.c src/wayland/wayland.c \
+// Compile: gcc -DTESTING src/wayland/wayland.c \
 //              src/wayland/xdg-shell-client-protocol.c \
 //              src/raster.c src/io.c \
 //              src/vulkan/tests/test_vulkan.c \
 //              -I. -lvulkan -lwayland-client -o vulkan_test
 // Run:     ./vulkan_test
 
-#define _GNU_SOURCE
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include "include/defs.h"
-#include "src/vulkan/vulkan.h"
+#include "src/vulkan/vulkan.c"
 
 static int tests_run    = 0;
 static int tests_failed = 0;

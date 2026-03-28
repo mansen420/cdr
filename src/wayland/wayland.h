@@ -41,15 +41,15 @@ typedef struct dpyctx
 } wlctx;
 
 // handlers
-void toplvlcnf_h(
+static void toplvlcnf_h(
   void *, struct xdg_toplevel *, int32_t, int32_t, struct wl_array *);
-void toplvlclose_h(void *, struct xdg_toplevel *);
-void toplvlbounds_h(void *, struct xdg_toplevel *, int32_t, int32_t);
-void toplvlcpb_h(void *, struct xdg_toplevel *, struct wl_array *);
-void xdgsrf_h(void *, struct xdg_surface *, uint32_t);
-void regobj_h(void *, struct wl_registry *, uint32_t, const char *, uint32_t);
-void regobjr_h(void *, struct wl_registry *, uint32_t);
-void xdgping_h(void *, struct xdg_wm_base *, uint32_t);
+static void toplvlclose_h(void *, struct xdg_toplevel *);
+static void toplvlbounds_h(void *, struct xdg_toplevel *, int32_t, int32_t);
+static void toplvlcpb_h(void *, struct xdg_toplevel *, struct wl_array *);
+static void xdgsrf_h(void *, struct xdg_surface *, uint32_t);
+static void regobj_h(void *, struct wl_registry *, uint32_t, const char *, uint32_t);
+static void regobjr_h(void *, struct wl_registry *, uint32_t);
+static void xdgping_h(void *, struct xdg_wm_base *, uint32_t);
 
 // public API (mirrored from display.h for internal use)
 int    dpyinit(dpyctx **, const char *, unsigned, unsigned, u32);
