@@ -26,7 +26,7 @@ int main(int argc, char **argv)
   replctx *repl= NULL;
 
   if(dpyinit(&dpy, "CDR", 800, 600, 0) < 0) goto exit;
-  if(gfxinit(&gfx, dpy) < 0) goto exit;
+  if(gfxinit(&gfx, dpy, (gfxdesc){0}) < 0) goto exit;
 
   // prepare shader
   {

@@ -5,6 +5,7 @@
 #include "include/display.h"
 
 typedef struct gfxctx gfxctx;
+typedef struct gfxmem gfxmem;
 
 // -- vertex buffer ------------------------------------------------------------
 #define GFX_MAX_VTXATTRS 8
@@ -35,7 +36,7 @@ typedef struct
 
 typedef struct gfxbuf gfxbuf;
 
-int  gfxinit_vtxbuf(gfxbuf **, gfxctx *, gfxdesc_vtxbuf, const void *data);
+int  gfxinit_vtxbuf(gfxbuf **, gfxctx *, gfxmem *, gfxdesc_vtxbuf, const void *data);
 void gfxterm_vtxbuf(gfxctx *, gfxbuf *);
 
 // -- image --------------------------------------------------------------------
@@ -57,7 +58,7 @@ typedef struct
 
 typedef struct gfximg gfximg;
 
-int  gfxinit_img(gfximg **, gfxctx *, gfxdesc_img);
+int  gfxinit_img(gfximg **, gfxctx *, gfxmem *, gfxdesc_img);
 void gfxterm_img(gfxctx *, gfximg *);
 
 // -- pipeline -----------------------------------------------------------------
@@ -88,8 +89,21 @@ typedef struct
 
 int gfxrender(gfxctx *, gfxpass *, u32 nrpasses);
 
+// -- memory -------------------------------------------------------------------
+typedef struct
+{
+  usize      devmem;
+  usize      hostmem;
+  u32        nrframes;
+  gfxfmt_img swpfmt;
+  u32        flags;
+} gfxdesc;
+
+int  gfxinit_mem(gfxmem **, gfxctx *, usize bytes);
+void gfxterm_mem(gfxctx *, gfxmem *);
+
 // -- context ------------------------------------------------------------------
-int  gfxinit(gfxctx **, dpyctx *);
+int  gfxinit(gfxctx **, dpyctx *, gfxdesc);
 void gfxterm(gfxctx *);
 int  gfxqry_init(gfxctx *);
 void gfxpause(gfxctx *);

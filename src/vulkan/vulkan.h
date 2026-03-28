@@ -37,7 +37,7 @@ typedef struct vkfrmctx
   VkFence         fence;
 } frmctx;
 
-typedef struct
+typedef struct gfxmem
 {
   VkDeviceMemory data;
   usize          size;
@@ -84,8 +84,7 @@ typedef struct gfxctx
   u32    nrframes;
 
   // memory
-  vkarena   arenas[32];
-  u32       nrarenas;
+  vkarena  dfltpool;
   VkBuffer vtxbuf;
 
   // render state
@@ -138,7 +137,7 @@ struct gfxbuf
 };
 
 // internal — init/term
-static int    init(vkctx **, void *dpy);
+static int    init(vkctx **, void *dpy, gfxdesc desc);
 static void   term(vkctx *ctx);
 static void   frmterm(vkctx *ctx, u32 idx);
 static int    frminit(vkctx *ctx);
@@ -149,8 +148,8 @@ static int    reinitswp(vkctx *ctx, i32 w_new, i32 h_new);
 static int render(vkctx *ctx);
 
 // internal — memory
-static vkarena *arenainit(
-  vkctx *ctx, u32 idx, usize bytes, VkMemoryPropertyFlags flags);
+static int arenainit(
+  vkarena *out, vkctx *ctx, usize bytes, VkMemoryPropertyFlags flags);
 static void     arenaclear(vkarena *arena);
 static void     arenaterm(vkctx *ctx, vkarena *arena);
 static i64      arena_suballoc(vkarena *arena, usize bytes, usize align);
