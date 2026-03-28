@@ -562,7 +562,10 @@ static int init_vtxbuf(
   gfxbuf **out, gfxctx *ctx, gfxmem *mem, gfxdesc_vtxbuf desc, const void *data)
 {
   gfxbuf *buf= NULL;
-  if(!ctx || !mem || !data) goto err;
+  if(!ctx || !data) goto err;
+  if(!mem)
+    if(!ctx->dfltpool.data) goto err;
+    else mem= &ctx->dfltpool;
 
   buf= calloc(1, sizeof *buf);
   if(!buf) goto err;
@@ -637,7 +640,10 @@ static int init_img(
 {
 	gfximg *img= NULL;
 	VkResult res;
-	if(!ctx || !mem || !out) goto err;
+	if(!ctx || !out) goto err;
+	if(!mem)
+		if(!ctx->dfltpool.data) goto err;
+		else mem= &ctx->dfltpool;
 	
 	img= calloc(1, sizeof *img);
 	if(!img) goto err;
