@@ -586,6 +586,94 @@ int gfxinit_vtxbuf(
 }
 void gfxterm_vtxbuf(gfxctx *c, gfxbuf *b) { term_vtxbuf(c, b); }
 
+static void term_img(vkctx *ctx, gfximg *img)
+{
+  if(!ctx || !img) return;
+  if(img->img) vkDestroyImage(ctx->dev, img->img, NULL);
+  free(img);
+}
+
+static VkFormat imgfmt_to_vk(gfxfmt_img fmt)
+{
+  switch(fmt)
+  {
+  case GFXFMT_RGBA8_SRGB:   return VK_FORMAT_R8G8B8A8_SRGB;
+  case GFXFMT_RGBA8_UNORM:  return VK_FORMAT_R8G8B8A8_UNORM;
+  case GFXFMT_BGRA8_SRGB:   return VK_FORMAT_B8G8R8A8_SRGB;
+  case GFXFMT_BGRA8_UNORM:  return VK_FORMAT_B8G8R8A8_UNORM;
+  case GFXFMT_R8_UNORM:     return VK_FORMAT_R8_UNORM;
+  case GFXFMT_D32_SFLOAT:   return VK_FORMAT_D32_SFLOAT;
+  default:                   return VK_FORMAT_UNDEFINED;
+  }
+}
+
+static i64 imgalloc(vkctx *ctx, vkarena *arena, VkImage img)
+{
+  if(!ctx || !arena || !img) return -1;
+
+  VkMemoryRequirements reqs;
+  vkGetImageMemoryRequirements(ctx->dev, img, &reqs);
+
+  if(!(reqs.memoryTypeBits & (1U << arena->typeidx))) return -1;
+
+  usize saved_offset= arena->offset;
+  usize saved_slop  = arena->slop;
+
+  i64 offset= arena_suballoc(arena, reqs.size, reqs.alignment);
+  if(offset < 0) return -1;
+
+  VkResult res= vkBindImageMemory(ctx->dev, img, arena->data, (usize)offset);
+  if(res != 0)
+  {
+    arena->offset= saved_offset;
+    arena->slop  = saved_slop;
+    return -1;
+  }
+
+  return offset;
+}
+static int init_img(
+  gfximg **out, vkctx *ctx, gfxmem *mem, gfxdesc_img desc)
+{
+	gfximg *img= NULL;
+	VkResult res;
+	if(!ctx || !mem || !out) goto err;
+	
+	img= calloc(1, sizeof *img);
+	if(!img) goto err;
+	
+	{
+		VkImageCreateInfo info=
+		{
+			.sType= VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+			.imageType= VK_IMAGE_TYPE_2D,
+			.extent= {desc.w,  desc.h, 1},
+			.tiling= VK_IMAGE_TILING_OPTIMAL,
+			.usage= VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+			.format= imgfmt_to_vk(desc.fmt),
+			.mipLevels= 1,
+			.arrayLayers= 1,
+			.samples= VK_SAMPLE_COUNT_1_BIT
+		};
+		res= vkCreateImage(ctx->dev, &info, NULL, &img->img);
+		if(res < 0) goto err;
+	}
+	
+	if(imgalloc(ctx, mem, img->img) < 0) goto err;
+	
+	img->desc= desc;
+	*out= img;
+	return 0;
+err:
+	term_img(ctx, img);
+  return -1;
+}
+
+
+int  gfxinit_img(gfximg **o, gfxctx *c, gfxmem *m, gfxdesc_img d)
+{ return init_img(o, c, m, d); }
+void gfxterm_img(gfxctx *c, gfximg *i) { term_img(c, i); }
+
 static int init_mem(gfxmem **out, vkctx *ctx, usize bytes)
 {
   gfxmem *mem= NULL;
@@ -1050,7 +1138,7 @@ static i64 arena_suballoc(vkarena *arena, usize bytes, usize align)
 err:
   return -1;
 }
-static i64 memalloc(vkctx *ctx, vkarena *arena, VkBuffer buf)
+static i64 bufferalloc(vkctx *ctx, vkarena *arena, VkBuffer buf)
 {
   if(!ctx || !arena || !buf) return -1;
 
@@ -1113,7 +1201,7 @@ static VkBuffer updata_staged(
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT};
     OK(vkCreateBuffer(ctx->dev, &info, NULL, &buf), goto err;)
 
-    i64 offset= memalloc(ctx, dev, buf);
+    i64 offset= bufferalloc(ctx, dev, buf);
     if(offset < 0) goto err;
   }
   // create and bind staging buffer, and copy data
@@ -1124,7 +1212,7 @@ static VkBuffer updata_staged(
       .usage= VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
     OK(vkCreateBuffer(ctx->dev, &info, NULL, &staging), goto err;)
 
-    i64 offset= memalloc(ctx, host, staging);
+    i64 offset= bufferalloc(ctx, host, staging);
     if(offset < 0) goto err;
 
     void *addr;
@@ -1201,7 +1289,7 @@ static VkBuffer updata_direct(
   res= vkCreateBuffer(ctx->dev, &info, NULL, &buf);
   OK(res, goto err;)
 
-  i64 offset= memalloc(ctx, mem, buf);
+  i64 offset= bufferalloc(ctx, mem, buf);
   if(offset < 0) goto err;
 
   void *mapped;

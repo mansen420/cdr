@@ -136,6 +136,12 @@ struct gfxbuf
   gfxdesc_vtxbuf desc;
 };
 
+struct gfximg
+{
+  VkImage    img;
+  gfxdesc_img desc;
+};
+
 // internal — init/term
 static int    init(vkctx **, void *dpy, gfxdesc desc);
 static void   term(vkctx *ctx);
