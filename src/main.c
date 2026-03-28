@@ -59,7 +59,7 @@ int main(int argc, char **argv)
   while(!quit)
   {
 		dpypoll(dpy);
-    if(gfxrender(gfx) < 0) break;
+    if(gfxrender(gfx, NULL, 0) < 0) break;
   }
   // reploop(repl);
 
