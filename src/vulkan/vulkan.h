@@ -139,10 +139,10 @@ struct gfxbuf
 // internal — init/term
 static int    init(vkctx **, void *dpy, gfxdesc desc);
 static void   term(vkctx *ctx);
-static void   frmterm(vkctx *ctx, u32 idx);
-static int    frminit(vkctx *ctx);
-static int    initgfxppl(vkctx *ctx, const u32 *shcode, u32 shlen);
-static int    reinitswp(vkctx *ctx, i32 w_new, i32 h_new);
+static void   term_frame(vkctx *ctx, u32 idx);
+static int    init_frame(vkctx *ctx);
+static int    init_ppl(vkctx *ctx, const u32 *shcode, u32 shlen);
+static int    reinit_swp(vkctx *ctx, i32 w_new, i32 h_new);
 
 // internal — process
 static int render(vkctx *ctx);

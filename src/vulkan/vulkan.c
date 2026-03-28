@@ -342,7 +342,7 @@ err:
   return -1;
 }
 
-static void frmterm(vkctx *ctx, u32 idx)
+static void term_frame(vkctx *ctx, u32 idx)
 {
   if(idx >= ctx->nrframes) goto err;
 
@@ -363,7 +363,7 @@ static void term(vkctx *ctx)
 
   if(ctx->vtxbuf) vkDestroyBuffer(ctx->dev, ctx->vtxbuf, NULL);
   arenaterm(ctx, &ctx->dfltpool);
-  for(unsigned i= 0; i < ctx->nrframes; i++) frmterm(ctx, i);
+  for(unsigned i= 0; i < ctx->nrframes; i++) term_frame(ctx, i);
   if(ctx->prscmdpool) vkDestroyCommandPool(ctx->dev, ctx->prscmdpool, NULL);
   if(ctx->gfxcmdpool) vkDestroyCommandPool(ctx->dev, ctx->gfxcmdpool, NULL);
   for(unsigned i= 0; i < ctx->nrshaders; i++)
@@ -381,7 +381,7 @@ static void term(vkctx *ctx)
   free(ctx);
 }
 
-static int initgfxppl(vkctx *ctx, const u32 *shcode, u32 shlen)
+static int init_ppl(vkctx *ctx, const u32 *shcode, u32 shlen)
 {
   if(!ctx || !shcode) goto err;
   // shader
@@ -518,7 +518,7 @@ int  gfxrender(gfxctx *ctx, gfxpass *passes, u32 nrpasses)
 void gfxupdate(gfxctx *ctx, i32 w, i32 h)
 {
   vkDeviceWaitIdle(ctx->dev);
-  reinitswp(ctx, w, h);
+  reinit_swp(ctx, w, h);
 }
 
 static void term_vtxbuf(gfxctx *ctx, gfxbuf *buf)
@@ -617,7 +617,7 @@ int  gfxinit_mem(gfxmem **o, gfxctx *c, usize bytes)
 { return init_mem(o, c, bytes); }
 void gfxterm_mem(gfxctx *c, gfxmem *m) { term_mem(c, m); }
 
-static int frminit(vkctx *ctx)
+static int init_frame(vkctx *ctx)
 {
   if(!ctx) goto err;
 
@@ -654,7 +654,7 @@ err:
 }
 
 // caller must synchronise
-static int reinitswp(vkctx *ctx, i32 w_new, i32 h_new)
+static int reinit_swp(vkctx *ctx, i32 w_new, i32 h_new)
 {
   if(!ctx) goto err;
 
@@ -1191,8 +1191,8 @@ int gfxprep(gfxctx *ctx, const u32 *spv, usize nrbytes)
   }
 
   NNUL(ctx->vtxbuf, goto err;)
-  OK(initgfxppl(ctx, spv, nrbytes), goto err;)
-  OK(frminit(ctx), goto err;)
+  OK(init_ppl(ctx, spv, nrbytes), goto err;)
+  OK(init_frame(ctx), goto err;)
 
   return 0;
 err:
