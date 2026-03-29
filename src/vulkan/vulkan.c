@@ -10,6 +10,7 @@
 
 static const char *const VK_LAYER_VALID_NAME= "VK_LAYER_KHRONOS_validation";
 
+
 static int init(vkctx **out, void *dpy, gfxdesc desc)
 {
   vkctx *ctx= calloc(1, sizeof *ctx);
@@ -508,7 +509,7 @@ int gfxinit(gfxctx **out, dpyctx *dpy, gfxdesc desc)
   return init(out, dpy, desc);
 }
 void gfxterm(gfxctx *ctx) { term(ctx); }
-int  gfxqry_init(gfxctx *ctx) { return ctx && ctx->alive; }
+int    gfxqry_init(gfxctx *ctx) { return ctx && ctx->alive; }
 void   gfxpause(gfxctx *ctx) { ctx->pause= 1; }
 void   gfxresume(gfxctx *ctx) { ctx->pause= 0; }
 gfximg *gfxget_display(gfxctx *ctx) { return ctx->swp ? DISPLAY_IMG : NULL; }

@@ -9,9 +9,9 @@ typedef struct gfxctx gfxctx;
 // -- memory -------------------------------------------------------------------
 typedef struct gfxmem gfxmem;
 
-int   gfxinit_mem(gfxmem **, gfxctx *, usize bytes);
-int   gfxinit_mapped(gfxmem **, gfxctx *, usize bytes, void **ptr);
-void  gfxterm_mem(gfxctx *, gfxmem *);
+int  gfxinit_mem(gfxmem **, gfxctx *, usize bytes);
+int  gfxinit_mapped(gfxmem **, gfxctx *, usize bytes, void **ptr);
+void gfxterm_mem(gfxctx *, gfxmem *);
 
 // -- vertex buffer ------------------------------------------------------------
 #define GFX_MAX_VTXATTRS 8
@@ -42,7 +42,8 @@ typedef struct
 
 typedef struct gfxbuf gfxbuf;
 
-int  gfxinit_vtxbuf(gfxbuf **, gfxctx *, gfxmem *, gfxdesc_vtxbuf, const void *data);
+int gfxinit_vtxbuf(
+  gfxbuf **, gfxctx *, gfxmem *, gfxdesc_vtxbuf, const void *data);
 void gfxterm_vtxbuf(gfxctx *, gfxbuf *);
 
 // -- image --------------------------------------------------------------------
@@ -87,16 +88,31 @@ void gfxterm_ppl(gfxctx *, gfxppl *);
 
 typedef struct
 {
-  gfxppl *ppl;
-  gfxbuf *vtx;
-  gfximg *inputs[GFX_MAX_PASS_IMGS];
-  u32     nrinputs;
   gfximg *outputs[GFX_MAX_PASS_IMGS];
   u32     nroutputs;
-} gfxpass;
+} gfxdesc_pass;
 
-int gfxrender(gfxctx *, gfxpass *, u32 nrpasses);
+typedef struct gfxpass gfxpass;
 
+int  gfxinit_pass(gfxpass **, gfxctx *, gfxdesc_pass);
+void gfxterm_pass(gfxctx *, gfxpass *);
+
+// -- commands -----------------------------------------------------------------
+#define GFX_MAX_DRAW_IMGS 8
+
+typedef struct
+{
+  gfxppl *ppl;
+  gfxbuf *vtx;
+  gfxbuf *idx;
+  gfximg *inputs[GFX_MAX_DRAW_IMGS];
+  u32     nrinputs;
+} gfxdesc_drawcmd;
+
+void gfxcmd_begin(gfxpass *);
+void gfxcmd_draw(gfxpass *, gfxdesc_drawcmd);
+void gfxcmd_end(gfxpass *);
+int  gfxsubmit(gfxctx *, gfxpass *);
 
 // -- context ------------------------------------------------------------------
 typedef struct
