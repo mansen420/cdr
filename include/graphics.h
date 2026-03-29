@@ -67,6 +67,8 @@ typedef struct gfximg gfximg;
 int  gfxinit_img(gfximg **, gfxctx *, gfxmem *, gfxdesc_img);
 void gfxterm_img(gfxctx *, gfximg *);
 
+gfximg *gfxget_display(gfxctx *);
+
 // -- pipeline -----------------------------------------------------------------
 typedef struct
 {

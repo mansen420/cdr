@@ -28,6 +28,8 @@
 #define ARENAS_MAX 32
 #define MB (1024 * 1024)
 
+static gfximg *const DISPLAY_IMG= (gfximg *)1;
+
 #define VKNULL VK_NULL_HANDLE
 
 typedef struct vkfrmctx
