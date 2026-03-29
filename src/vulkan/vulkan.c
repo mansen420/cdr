@@ -387,15 +387,10 @@ static void term(vkctx *ctx)
   vkDeviceWaitIdle(ctx->dev);
 
   if(ctx->offlinefence) vkDestroyFence(ctx->dev, ctx->offlinefence, NULL);
-  if(ctx->vtxbuf) vkDestroyBuffer(ctx->dev, ctx->vtxbuf, NULL);
   arenaterm(ctx, &ctx->dfltpool);
   for(unsigned i= 0; i < ctx->nrframes; i++) term_frame(ctx, i);
   if(ctx->prscmdpool) vkDestroyCommandPool(ctx->dev, ctx->prscmdpool, NULL);
   if(ctx->gfxcmdpool) vkDestroyCommandPool(ctx->dev, ctx->gfxcmdpool, NULL);
-  for(unsigned i= 0; i < ctx->nrshaders; i++)
-    vkDestroyShaderModule(ctx->dev, ctx->shaders[i], NULL);
-  if(ctx->gfxppl) vkDestroyPipeline(ctx->dev, ctx->gfxppl, NULL);
-  if(ctx->layout) vkDestroyPipelineLayout(ctx->dev, ctx->layout, NULL);
   for(unsigned i= 0; i < ctx->nrswpimgs; i++)
     if(ctx->swpimgvs[i]) vkDestroyImageView(ctx->dev, ctx->swpimgvs[i], NULL);
   if(ctx->swp) vkDestroySwapchainKHR(ctx->dev, ctx->swp, NULL);
@@ -405,128 +400,6 @@ static void term(vkctx *ctx)
 
   memset(ctx, 0, sizeof *ctx);
   free(ctx);
-}
-
-static int init_ppl(vkctx *ctx, const u32 *shcode, u32 shlen)
-{
-  if(!ctx || !shcode) goto err;
-  // shader
-  {
-    VkShaderModuleCreateInfo info= {
-      .sType   = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-      .codeSize= shlen,
-      .pCode   = shcode};
-    if(ctx->nrshaders >= SHADERS_MAX) goto err;
-
-    VkResult res= vkCreateShaderModule(
-      ctx->dev, &info, NULL, &ctx->shaders[ctx->nrshaders++]);
-    OK(res, goto err;)
-  }
-  VkShaderModule module= ctx->shaders[ctx->nrshaders - 1];
-
-  VkPipelineShaderStageCreateInfo stages[2];
-
-  stages[0]= (VkPipelineShaderStageCreateInfo){
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-    .stage = VK_SHADER_STAGE_VERTEX_BIT,
-    .module= module,
-    .pName = "vertMain"};
-  stages[1]= (VkPipelineShaderStageCreateInfo){
-    .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-    .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-    .module= module,
-    .pName = "fragMain"};
-
-  VkVertexInputBindingDescription bind= {
-    .binding  = 0,
-    .stride   = sizeof(vertex),
-    .inputRate= VK_VERTEX_INPUT_RATE_VERTEX};
-  VkVertexInputAttributeDescription attrs[2];
-  attrs[0]= (VkVertexInputAttributeDescription){
-    .location= 0,
-    .binding = 0,
-    .format  = VK_FORMAT_R32G32_SFLOAT,
-    offsetof(vertex, pos)};
-  attrs[1]= (VkVertexInputAttributeDescription){
-    .location= 1,
-    .binding = 0,
-    .format  = VK_FORMAT_R32G32B32_SFLOAT,
-    offsetof(vertex, color)};
-
-  VkPipelineVertexInputStateCreateInfo inputinfo= {
-    .sType= VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    .vertexBindingDescriptionCount  = 1,
-    .pVertexBindingDescriptions     = &bind,
-    .vertexAttributeDescriptionCount= 2,
-    .pVertexAttributeDescriptions   = attrs};
-
-  VkPipelineInputAssemblyStateCreateInfo asminfo= {
-    .sType   = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    .topology= VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
-
-  VkDynamicState dynstate[]= {
-    VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-  VkPipelineDynamicStateCreateInfo dyninfo= {
-    .sType            = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    .dynamicStateCount= 2,
-    .pDynamicStates   = dynstate};
-
-  VkPipelineViewportStateCreateInfo vpinfo= {
-    .sType        = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-    .viewportCount= 1,
-    .scissorCount = 1};
-
-  VkPipelineRasterizationStateCreateInfo rstate= {
-    .sType      = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    .polygonMode= VK_POLYGON_MODE_FILL,
-    .cullMode   = VK_CULL_MODE_BACK_BIT,
-    .frontFace  = VK_FRONT_FACE_CLOCKWISE,
-    .lineWidth  = 1.f};
-
-  VkPipelineMultisampleStateCreateInfo msinfo= {
-    .sType= VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-    .rasterizationSamples= VK_SAMPLE_COUNT_1_BIT};
-
-  VkPipelineColorBlendAttachmentState blendattinfo= {
-    .blendEnable   = VK_FALSE,
-    .colorWriteMask= VK_COLOR_COMPONENT_A_BIT | VK_COLOR_COMPONENT_B_BIT |
-                     VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_R_BIT};
-  VkPipelineColorBlendStateCreateInfo blendinfo= {
-    .sType          = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    .logicOpEnable  = VK_FALSE,
-    .attachmentCount= 1,
-    .pAttachments   = &blendattinfo};
-
-  VkPipelineLayoutCreateInfo plinfo= {
-    .sType= VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-  vkCreatePipelineLayout(ctx->dev, &plinfo, NULL, &ctx->layout);
-
-  VkPipelineRenderingCreateInfo rinfo= {
-    .sType                  = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-    .colorAttachmentCount   = 1,
-    .pColorAttachmentFormats= &ctx->swpsfmt.format};
-
-  VkGraphicsPipelineCreateInfo gfxinfo= {
-    .sType              = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-    .pNext              = &rinfo,
-    .stageCount         = 2,
-    .pStages            = stages,
-    .pVertexInputState  = &inputinfo,
-    .pInputAssemblyState= &asminfo,
-    .pViewportState     = &vpinfo,
-    .pRasterizationState= &rstate,
-    .pMultisampleState  = &msinfo,
-    .pColorBlendState   = &blendinfo,
-    .pDynamicState      = &dyninfo,
-    .layout             = ctx->layout};
-  VkResult res= vkCreateGraphicsPipelines(
-    ctx->dev, VK_NULL_HANDLE, 1, &gfxinfo, NULL, &ctx->gfxppl);
-  OK(res, goto err;);
-
-  return 0;
-err:
-  puts("Vulkan pipeline creation failed");
-  return -1;
 }
 
 static int init_ppl_desc(vkctx *ctx, gfxppl **out, gfxdesc_ppl desc)
@@ -673,12 +546,6 @@ int     gfxqry_init(gfxctx *ctx) { return ctx && ctx->alive; }
 void    gfxpause(gfxctx *ctx) { ctx->pause= 1; }
 void    gfxresume(gfxctx *ctx) { ctx->pause= 0; }
 gfximg *gfxget_display(gfxctx *ctx) { return ctx->swp ? DISPLAY_IMG : NULL; }
-int     gfxrender(gfxctx *ctx, gfxpass *passes, u32 nrpasses)
-{
-  (void)passes;
-  (void)nrpasses;
-  return render(ctx);
-}
 void gfxupdate(gfxctx *ctx, i32 w, i32 h)
 {
   vkDeviceWaitIdle(ctx->dev);
@@ -1110,177 +977,6 @@ err:
   return -1;
 }
 
-static int render(vkctx *ctx)
-{
-  if(ctx->pause) return 0;
-
-  VkResult res= VK_SUCCESS;
-
-  frmctx *frm= &ctx->frames[ctx->frmidx];
-
-  vkWaitForFences(ctx->dev, 1, &frm->fence, VK_TRUE, UINT64_MAX);
-
-  // print diagnostics
-  {
-    static const u64 PRINT_INTERVAL_NS= (1000000000ULL / 15);
-    struct timespec  t_now;
-    clock_gettime(CLOCK_MONOTONIC, &t_now);
-    if(ctx->diag_t_last.tv_sec || ctx->diag_t_last.tv_nsec)
-    {
-      u64 delta_ns=
-        (u64)(t_now.tv_sec - ctx->diag_t_last.tv_sec) * 1000000000ULL +
-        (u64)(t_now.tv_nsec - ctx->diag_t_last.tv_nsec);
-      ctx->diag_acc_ns+= delta_ns;
-      ctx->diag_acc_count++;
-      if(ctx->diag_acc_ns >= PRINT_INTERVAL_NS)
-      {
-        double avg_ms = (double)ctx->diag_acc_ns / ctx->diag_acc_count / 1e6;
-        double avg_fps= 1e9 / ((double)ctx->diag_acc_ns / ctx->diag_acc_count);
-        // comment out the print. later just write this to some frame
-        // diagnostics struct
-        // printf(
-        //   "frame=%-6u  ft=%-4.3fms  fps=%-8.1f\r",
-        //   ctx->absfrmidx,
-        //   avg_ms,
-        //   avg_fps);
-        // fflush(stdout);
-        ctx->diag_acc_ns   = 0;
-        ctx->diag_acc_count= 0;
-      }
-    }
-    ctx->diag_t_last= t_now;
-  }
-
-  VkSemaphore acqsem= frm->imggotten;
-  u32         imgidx;
-  res= vkAcquireNextImageKHR(
-    ctx->dev, ctx->swp, UINT64_MAX, acqsem, VKNULL, &imgidx);
-  OK(res, goto err;)
-
-  VkSemaphore subsem= ctx->frames[imgidx].renderfin;
-
-  // submit work
-  {
-    // record cmds
-    {
-      NNUL(ctx->vtxbuf, goto err;)
-
-      vkResetCommandBuffer(frm->cmdbuf, 0);
-      VkCommandBufferBeginInfo binfo= {
-        .sType= VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-      vkBeginCommandBuffer(frm->cmdbuf, &binfo);
-
-      VkImageMemoryBarrier2 renderb= {
-        .sType              = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask       = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-        .dstStageMask       = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask      = VK_ACCESS_2_NONE,
-        .dstAccessMask      = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .oldLayout          = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout          = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .srcQueueFamilyIndex= VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex= VK_QUEUE_FAMILY_IGNORED,
-        .image              = ctx->swpimgs[imgidx],
-        .subresourceRange   = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
-      VkDependencyInfo renderd= {
-        .sType                  = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount= 1,
-        .pImageMemoryBarriers   = &renderb};
-
-      vkCmdPipelineBarrier2(frm->cmdbuf, &renderd);
-
-      VkRenderingAttachmentInfo attinfo= {
-        .sType      = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView  = ctx->swpimgvs[imgidx],
-        .imageLayout= VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .loadOp     = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        .storeOp    = VK_ATTACHMENT_STORE_OP_STORE};
-      VkRenderingInfo renderinfo= {
-        .sType               = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea          = {{0, 0}, ctx->swpextent},
-        .colorAttachmentCount= 1,
-        .pColorAttachments   = &attinfo,
-        .layerCount          = 1};
-      vkCmdBeginRendering(frm->cmdbuf, &renderinfo);
-
-      vkCmdBindPipeline(
-        frm->cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx->gfxppl);
-      VkViewport vp= {
-        0, 0, (f32)ctx->swpextent.width, (f32)ctx->swpextent.height, 0.f, 1.f};
-      vkCmdSetViewport(frm->cmdbuf, 0, 1, &vp);
-      VkRect2D scissor= {.extent= ctx->swpextent};
-      vkCmdSetScissor(frm->cmdbuf, 0, 1, &scissor);
-
-      VkDeviceSize vtxoff= 0;
-      vkCmdBindVertexBuffers(frm->cmdbuf, 0, 1, &ctx->vtxbuf, &vtxoff);
-      vkCmdDraw(frm->cmdbuf, 3, 1, 0, 0);
-
-      vkCmdEndRendering(frm->cmdbuf);
-
-      VkImageMemoryBarrier2 prsb= {
-        .sType           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask    = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstStageMask    = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-        .srcAccessMask   = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstAccessMask   = VK_ACCESS_2_NONE,
-        .oldLayout       = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .newLayout       = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .image           = ctx->swpimgs[imgidx],
-        .subresourceRange= {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
-      VkDependencyInfo prsd= {
-        .sType                  = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount= 1,
-        .pImageMemoryBarriers   = &prsb};
-
-      vkCmdPipelineBarrier2(frm->cmdbuf, &prsd);
-
-      vkEndCommandBuffer(frm->cmdbuf);
-    }
-    VkSemaphoreSubmitInfo waitinfo= {
-      .sType    = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-      .stageMask= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-      .semaphore= acqsem};
-    VkSemaphoreSubmitInfo siginfo= {
-      .sType    = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-      .stageMask= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-      .semaphore= subsem};
-    VkCommandBufferSubmitInfo cmdinfo= {
-      .sType        = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-      .commandBuffer= frm->cmdbuf};
-    VkSubmitInfo2 subinfo= {
-      .sType                   = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-      .waitSemaphoreInfoCount  = 1,
-      .pWaitSemaphoreInfos     = &waitinfo,
-      .signalSemaphoreInfoCount= 1,
-      .pSignalSemaphoreInfos   = &siginfo,
-      .commandBufferInfoCount  = 1,
-      .pCommandBufferInfos     = &cmdinfo};
-
-    vkResetFences(ctx->dev, 1, &frm->fence);  // unsignal the fence
-    res= vkQueueSubmit2(ctx->gfxq, 1, &subinfo, frm->fence);
-    OK(res, goto err;)
-  }
-  // present
-  {
-    VkPresentInfoKHR presinfo= {
-      .sType             = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-      .waitSemaphoreCount= 1,
-      .pWaitSemaphores   = &subsem,
-      .swapchainCount    = 1,
-      .pSwapchains       = &ctx->swp,
-      .pImageIndices     = &imgidx};
-    res= vkQueuePresentKHR(ctx->prsq, &presinfo);
-    OK(res, goto err;)
-  }
-
-  ctx->frmidx= (ctx->frmidx + 1) % ctx->nrframes;
-  ctx->absfrmidx++;
-  return 0;
-err:
-  if(res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) return 1;
-  return -1;
-}
-
 static int arenainit(
   vkarena *out, vkctx *ctx, usize bytes, VkMemoryPropertyFlags flags)
 {
@@ -1514,27 +1210,6 @@ static VkBuffer updata_direct(
 err:
   if(buf) vkDestroyBuffer(ctx->dev, buf, NULL);
   return VKNULL;
-}
-
-int gfxprep(gfxctx *ctx, const u32 *spv, usize nrbytes)
-{
-  if(!ctx || !spv || !nrbytes) goto err;
-  // upload
-  {
-    vertex triangle[3]= {
-      {.pos= {.x= 0.0f, .y= -0.5f}, .color= {.r= 1.f, .g= 0.f, .b= 0.f}},
-      {.pos= {.x= 0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 1.f, .b= 0.f}},
-      {.pos= {.x= -0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 0.f, .b= 1.f}}};
-
-    ctx->vtxbuf= updata(ctx, &ctx->dfltpool, triangle, sizeof triangle);
-  }
-
-  NNUL(ctx->vtxbuf, goto err;)
-  OK(init_ppl(ctx, spv, nrbytes), goto err;)
-
-  return 0;
-err:
-  return -1;
 }
 
 static void printmeminfo(const vkctx *ctx)

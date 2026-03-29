@@ -145,5 +145,3 @@ void gfxpause(gfxctx *);
 void gfxresume(gfxctx *);
 void gfxupdate(gfxctx *, i32 w, i32 h);
 void gfxsync(gfxctx *);
-int  gfxprep(gfxctx *, const u32 *spv, usize nrbytes);
-int  gfxrender(gfxctx *, gfxpass *, u32 nrpasses); // legacy, remove when submit works

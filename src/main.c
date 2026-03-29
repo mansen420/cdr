@@ -101,12 +101,12 @@ int main(int argc, char **argv)
   // reploop(repl);
 
   rc= 0;
-	gfxsync(gfx);
 exit:
+  gfxsync(gfx);
   replterm(repl);
-	gfxterm_pass(gfx, pass);
-	gfxterm_ppl(gfx, ppl);
-	gfxterm_buf(gfx, vtx);
+  gfxterm_pass(gfx, pass);
+  gfxterm_ppl(gfx, ppl);
+  gfxterm_buf(gfx, vtx);
   gfxterm(gfx);
   dpyterm(dpy);
   free(spv);

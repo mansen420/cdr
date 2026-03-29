@@ -24,7 +24,6 @@
     DO                                                                \
   }
 
-#define SHADERS_MAX 16
 #define ARENAS_MAX 32
 #define MB (1024 * 1024)
 
@@ -68,12 +67,6 @@ typedef struct gfxctx
   VkImageView    swpimgvs[16];
   VkExtent2D     swpextent;
 
-  // pipeline stuff
-  VkShaderModule   shaders[SHADERS_MAX];
-  u32              nrshaders;
-  VkPipelineLayout layout;
-  VkPipeline       gfxppl;
-
   // cmdpool stuff
   VkCommandPool gfxcmdpool;
   VkCommandPool prscmdpool;
@@ -86,8 +79,7 @@ typedef struct gfxctx
   u32    nrframes;
 
   // memory
-  vkarena  dfltpool;
-  VkBuffer vtxbuf;
+  vkarena dfltpool;
 
   // offline submit
   VkCommandBuffer offlinecmdbuf;
@@ -129,13 +121,6 @@ typedef struct gfxctx
   u32 alive;
 } vkctx;
 
-// placeholder
-typedef struct
-{
-  t2f32 pos;
-  t3f32 color;
-} vertex;
-
 struct gfxbuf
 {
   VkBuffer       buf;
@@ -171,11 +156,7 @@ static int    init(vkctx **, void *dpy, gfxdesc desc);
 static void   term(vkctx *ctx);
 static void   term_frame(vkctx *ctx, u32 idx);
 static int    init_frame(vkctx *ctx);
-static int    init_ppl(vkctx *ctx, const u32 *shcode, u32 shlen);
 static int    reinit_swp(vkctx *ctx, i32 w_new, i32 h_new);
-
-// internal — process
-static int render(vkctx *ctx);
 
 // internal — pass / commands
 static int  init_pass(vkctx *, gfxpass **, gfxdesc_pass);
