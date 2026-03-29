@@ -1,5 +1,6 @@
 #include "src/vulkan/vulkan.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,9 +8,9 @@
 #include <vulkan/vulkan_core.h>
 
 #include "include/display.h"
+#include "include/graphics.h"
 
 static const char *const VK_LAYER_VALID_NAME= "VK_LAYER_KHRONOS_validation";
-
 
 static int init(vkctx **out, void *dpy, gfxdesc desc)
 {
@@ -320,19 +321,42 @@ static int init(vkctx **out, void *dpy, gfxdesc desc)
       ctx->prscmdpool= VKNULL;
   }
 
-  // default memory pool
-  if(desc.devmem)
+  // offline command buffer + fence
   {
-    VkMemoryPropertyFlags rbar_flags=
-      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    VkCommandBufferAllocateInfo ai= {
+      .sType             = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+      .commandPool       = ctx->gfxcmdpool,
+      .level             = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+      .commandBufferCount= 1};
+    OK(vkAllocateCommandBuffers(ctx->dev, &ai, &ctx->offlinecmdbuf), goto err;)
+
+    VkFenceCreateInfo fi= {
+      .sType= VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+      .flags= VK_FENCE_CREATE_SIGNALED_BIT};
+    OK(vkCreateFence(ctx->dev, &fi, NULL, &ctx->offlinefence), goto err;)
+  }
+
+  // implicit memory
+  if(!desc.flags & GFX_NO_IMPLICIT_MEM)
+  {
+		//TODO rather than default to 2MB, do lazy allozation and scale off the first
+		// request
+    if(!desc.devmem) desc.devmem= 2 * MB; 
+
+    VkMemoryPropertyFlags rbar_flags= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
     if(arenainit(&ctx->dfltpool, ctx, desc.devmem, rbar_flags) < 0)
-      OK(arenainit(&ctx->dfltpool, ctx, desc.devmem,
-                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
+      OK(arenainit(
+           &ctx->dfltpool,
+           ctx,
+           desc.devmem,
+           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
          goto err;)
   }
+
+  OK(init_frame(ctx), goto err;)
 
   ctx->alive= 1;
   *out      = ctx;
@@ -362,6 +386,7 @@ static void term(vkctx *ctx)
   if(!ctx) return;
   vkDeviceWaitIdle(ctx->dev);
 
+  if(ctx->offlinefence) vkDestroyFence(ctx->dev, ctx->offlinefence, NULL);
   if(ctx->vtxbuf) vkDestroyBuffer(ctx->dev, ctx->vtxbuf, NULL);
   arenaterm(ctx, &ctx->dfltpool);
   for(unsigned i= 0; i < ctx->nrframes; i++) term_frame(ctx, i);
@@ -504,16 +529,151 @@ err:
   return -1;
 }
 
+static int init_ppl_desc(vkctx *ctx, gfxppl **out, gfxdesc_ppl desc)
+{
+  gfxppl        *ppl   = NULL;
+  VkShaderModule module= VKNULL;
+  if(!out || !ctx || !desc.spv || !desc.nrbytes) goto err;
+
+  ppl= calloc(1, sizeof *ppl);
+  if(!ppl) goto err;
+  {
+    VkShaderModuleCreateInfo info= {
+      .sType   = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+      .codeSize= desc.nrbytes,
+      .pCode   = desc.spv};
+    OK(vkCreateShaderModule(ctx->dev, &info, NULL, &module), goto err;)
+  }
+
+  VkPipelineShaderStageCreateInfo stages[2]= {
+    {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+     .stage = VK_SHADER_STAGE_VERTEX_BIT,
+     .module= module,
+     .pName = "vertMain"},
+    {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+     .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+     .module= module,
+     .pName = "fragMain"}};
+
+  // vertex input from descriptor
+  VkVertexInputBindingDescription bind= {
+    .binding  = 0,
+    .stride   = desc.vtxdesc.vtxstride,
+    .inputRate= VK_VERTEX_INPUT_RATE_VERTEX};
+
+  VkVertexInputAttributeDescription attrs[GFX_MAX_VTXATTRS];
+  for(u32 i= 0; i < desc.vtxdesc.nrattrs; i++)
+    attrs[i]= (VkVertexInputAttributeDescription){
+      .location= i,
+      .binding = 0,
+      .format  = vtxfmt_to_vk(desc.vtxdesc.attrs[i].fmt),
+      .offset  = desc.vtxdesc.attrs[i].offset};
+
+  VkPipelineVertexInputStateCreateInfo inputinfo= {
+    .sType= VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    .vertexBindingDescriptionCount  = 1,
+    .pVertexBindingDescriptions     = &bind,
+    .vertexAttributeDescriptionCount= desc.vtxdesc.nrattrs,
+    .pVertexAttributeDescriptions   = attrs};
+
+  VkPipelineInputAssemblyStateCreateInfo asminfo= {
+    .sType   = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    .topology= VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
+
+  VkDynamicState dynstate[]= {
+    VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+  VkPipelineDynamicStateCreateInfo dyninfo= {
+    .sType            = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    .dynamicStateCount= 2,
+    .pDynamicStates   = dynstate};
+
+  VkPipelineViewportStateCreateInfo vpinfo= {
+    .sType        = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    .viewportCount= 1,
+    .scissorCount = 1};
+
+  VkPipelineRasterizationStateCreateInfo rstate= {
+    .sType      = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    .polygonMode= VK_POLYGON_MODE_FILL,
+    .cullMode   = VK_CULL_MODE_BACK_BIT,
+    .frontFace  = VK_FRONT_FACE_CLOCKWISE,
+    .lineWidth  = 1.f};
+
+  VkPipelineMultisampleStateCreateInfo msinfo= {
+    .sType= VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    .rasterizationSamples= VK_SAMPLE_COUNT_1_BIT};
+
+  VkPipelineColorBlendAttachmentState blendattinfo= {
+    .blendEnable   = VK_FALSE,
+    .colorWriteMask= VK_COLOR_COMPONENT_A_BIT | VK_COLOR_COMPONENT_B_BIT |
+                     VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_R_BIT};
+  VkPipelineColorBlendStateCreateInfo blendinfo= {
+    .sType          = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    .logicOpEnable  = VK_FALSE,
+    .attachmentCount= 1,
+    .pAttachments   = &blendattinfo};
+
+  VkPipelineLayoutCreateInfo plinfo= {
+    .sType= VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+  OK(vkCreatePipelineLayout(ctx->dev, &plinfo, NULL, &ppl->layout), goto err;)
+
+  VkPipelineRenderingCreateInfo rinfo= {
+    .sType                  = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+    .colorAttachmentCount   = 1,
+    .pColorAttachmentFormats= &ctx->swpsfmt.format};
+
+  VkGraphicsPipelineCreateInfo gfxinfo= {
+    .sType              = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+    .pNext              = &rinfo,
+    .stageCount         = 2,
+    .pStages            = stages,
+    .pVertexInputState  = &inputinfo,
+    .pInputAssemblyState= &asminfo,
+    .pViewportState     = &vpinfo,
+    .pRasterizationState= &rstate,
+    .pMultisampleState  = &msinfo,
+    .pColorBlendState   = &blendinfo,
+    .pDynamicState      = &dyninfo,
+    .layout             = ppl->layout};
+  OK(vkCreateGraphicsPipelines(
+       ctx->dev, VK_NULL_HANDLE, 1, &gfxinfo, NULL, &ppl->handle),
+     goto err;)
+
+  vkDestroyShaderModule(ctx->dev, module, NULL);
+
+  ppl->desc= desc;
+  *out     = ppl;
+  return 0;
+err:
+  if(ppl && ppl->layout) vkDestroyPipelineLayout(ctx->dev, ppl->layout, NULL);
+  if(module) vkDestroyShaderModule(ctx->dev, module, NULL);
+  free(ppl);
+  return -1;
+}
+
+static void term_ppl(vkctx *ctx, gfxppl *ppl)
+{
+  if(!ctx || !ppl) return;
+  if(ppl->handle) vkDestroyPipeline(ctx->dev, ppl->handle, NULL);
+  if(ppl->layout) vkDestroyPipelineLayout(ctx->dev, ppl->layout, NULL);
+  memset(ppl, 0, sizeof *ppl);
+  free(ppl);
+}
+
+int  gfxinit_ppl(gfxctx *c, gfxppl **o, gfxdesc_ppl d)
+{ return init_ppl_desc(c, o, d); }
+void gfxterm_ppl(gfxctx *c, gfxppl *p) { term_ppl(c, p); }
+
 int gfxinit(gfxctx **out, dpyctx *dpy, gfxdesc desc)
 {
   return init(out, dpy, desc);
 }
-void gfxterm(gfxctx *ctx) { term(ctx); }
-int    gfxqry_init(gfxctx *ctx) { return ctx && ctx->alive; }
-void   gfxpause(gfxctx *ctx) { ctx->pause= 1; }
-void   gfxresume(gfxctx *ctx) { ctx->pause= 0; }
+void    gfxterm(gfxctx *ctx) { term(ctx); }
+int     gfxqry_init(gfxctx *ctx) { return ctx && ctx->alive; }
+void    gfxpause(gfxctx *ctx) { ctx->pause= 1; }
+void    gfxresume(gfxctx *ctx) { ctx->pause= 0; }
 gfximg *gfxget_display(gfxctx *ctx) { return ctx->swp ? DISPLAY_IMG : NULL; }
-int  gfxrender(gfxctx *ctx, gfxpass *passes, u32 nrpasses)
+int     gfxrender(gfxctx *ctx, gfxpass *passes, u32 nrpasses)
 {
   (void)passes;
   (void)nrpasses;
@@ -524,6 +684,7 @@ void gfxupdate(gfxctx *ctx, i32 w, i32 h)
   vkDeviceWaitIdle(ctx->dev);
   reinit_swp(ctx, w, h);
 }
+void gfxsync(gfxctx *ctx) { vkDeviceWaitIdle(ctx->dev); }
 
 static void term_vtxbuf(gfxctx *ctx, gfxbuf *buf)
 {
@@ -561,13 +722,15 @@ err:
 }
 
 static int init_vtxbuf(
-  gfxbuf **out, gfxctx *ctx, gfxmem *mem, gfxdesc_vtxbuf desc, const void *data)
+  gfxctx *ctx, gfxbuf **out, gfxmem *mem, gfxdesc_vtxbuf desc, const void *data)
 {
   gfxbuf *buf= NULL;
   if(!ctx || !data) goto err;
   if(!mem)
-    if(!ctx->dfltpool.data) goto err;
-    else mem= &ctx->dfltpool;
+    if(!ctx->dfltpool.data)
+      goto err;
+    else
+      mem= &ctx->dfltpool;
 
   buf= calloc(1, sizeof *buf);
   if(!buf) goto err;
@@ -585,15 +748,16 @@ err:
 }
 
 int gfxinit_vtxbuf(
-  gfxbuf **o, gfxctx *c, gfxmem *m, gfxdesc_vtxbuf d, const void *data)
+  gfxctx *c, gfxbuf **o, gfxmem *m, gfxdesc_vtxbuf d, const void *data)
 {
-  return init_vtxbuf(o, c, m, d, data);
+  return init_vtxbuf(c, o, m, d, data);
 }
-void gfxterm_vtxbuf(gfxctx *c, gfxbuf *b) { term_vtxbuf(c, b); }
+void gfxterm_buf(gfxctx *c, gfxbuf *b) { term_vtxbuf(c, b); }
 
 static void term_img(vkctx *ctx, gfximg *img)
 {
   if(!ctx || !img) return;
+  if(img->view) vkDestroyImageView(ctx->dev, img->view, NULL);
   if(img->img) vkDestroyImage(ctx->dev, img->img, NULL);
   free(img);
 }
@@ -602,13 +766,34 @@ static VkFormat imgfmt_to_vk(gfxfmt_img fmt)
 {
   switch(fmt)
   {
-  case GFXFMT_RGBA8_SRGB:   return VK_FORMAT_R8G8B8A8_SRGB;
-  case GFXFMT_RGBA8_UNORM:  return VK_FORMAT_R8G8B8A8_UNORM;
-  case GFXFMT_BGRA8_SRGB:   return VK_FORMAT_B8G8R8A8_SRGB;
-  case GFXFMT_BGRA8_UNORM:  return VK_FORMAT_B8G8R8A8_UNORM;
-  case GFXFMT_R8_UNORM:     return VK_FORMAT_R8_UNORM;
-  case GFXFMT_D32_SFLOAT:   return VK_FORMAT_D32_SFLOAT;
-  default:                   return VK_FORMAT_UNDEFINED;
+    case GFXFMT_RGBA8_SRGB:
+      return VK_FORMAT_R8G8B8A8_SRGB;
+    case GFXFMT_RGBA8_UNORM:
+      return VK_FORMAT_R8G8B8A8_UNORM;
+    case GFXFMT_BGRA8_SRGB:
+      return VK_FORMAT_B8G8R8A8_SRGB;
+    case GFXFMT_BGRA8_UNORM:
+      return VK_FORMAT_B8G8R8A8_UNORM;
+    case GFXFMT_R8_UNORM:
+      return VK_FORMAT_R8_UNORM;
+    case GFXFMT_D32_SFLOAT:
+      return VK_FORMAT_D32_SFLOAT;
+    default:
+      return VK_FORMAT_UNDEFINED;
+  }
+}
+
+static VkFormat vtxfmt_to_vk(gfxfmt_vtx fmt)
+{
+  switch(fmt)
+  {
+    case GFXFMT_2F32: return VK_FORMAT_R32G32_SFLOAT;
+    case GFXFMT_3F32: return VK_FORMAT_R32G32B32_SFLOAT;
+    case GFXFMT_4F32: return VK_FORMAT_R32G32B32A32_SFLOAT;
+    case GFXFMT_2U8:  return VK_FORMAT_R8G8_UNORM;
+    case GFXFMT_3U8:  return VK_FORMAT_R8G8B8_UNORM;
+    case GFXFMT_4U8:  return VK_FORMAT_R8G8B8A8_UNORM;
+    default:          return VK_FORMAT_UNDEFINED;
   }
 }
 
@@ -637,52 +822,69 @@ static i64 imgalloc(vkctx *ctx, vkarena *arena, VkImage img)
 
   return offset;
 }
-static int init_img(
-  gfximg **out, vkctx *ctx, gfxmem *mem, gfxdesc_img desc)
+static int init_img(vkctx *ctx, gfximg **out, gfxmem *mem, gfxdesc_img desc)
 {
-	gfximg *img= NULL;
-	VkResult res;
-	if(!ctx || !out) goto err;
-	if(!mem)
-		if(!ctx->dfltpool.data) goto err;
-		else mem= &ctx->dfltpool;
-	
-	img= calloc(1, sizeof *img);
-	if(!img) goto err;
-	
-	{
-		VkImageCreateInfo info=
-		{
-			.sType= VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-			.imageType= VK_IMAGE_TYPE_2D,
-			.extent= {desc.w,  desc.h, 1},
-			.tiling= VK_IMAGE_TILING_OPTIMAL,
-			.usage= VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-			.format= imgfmt_to_vk(desc.fmt),
-			.mipLevels= 1,
-			.arrayLayers= 1,
-			.samples= VK_SAMPLE_COUNT_1_BIT
-		};
-		res= vkCreateImage(ctx->dev, &info, NULL, &img->img);
-		if(res < 0) goto err;
-	}
-	
-	if(imgalloc(ctx, mem, img->img) < 0) goto err;
-	
-	img->desc= desc;
-	*out= img;
-	return 0;
+  gfximg  *img= NULL;
+  VkResult res;
+  if(!ctx || !out) goto err;
+  if(!mem)
+    if(!ctx->dfltpool.data)
+      goto err;
+    else
+      mem= &ctx->dfltpool;
+
+  img= calloc(1, sizeof *img);
+  if(!img) goto err;
+
+  {
+    VkImageCreateInfo info= {
+      .sType    = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+      .imageType= VK_IMAGE_TYPE_2D,
+      .extent   = {desc.w, desc.h, 1},
+      .tiling   = VK_IMAGE_TILING_OPTIMAL,
+      .usage    = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .format   = imgfmt_to_vk(desc.fmt),
+      .mipLevels= 1,
+      .arrayLayers= 1,
+      .samples    = VK_SAMPLE_COUNT_1_BIT};
+    res= vkCreateImage(ctx->dev, &info, NULL, &img->img);
+    if(res < 0) goto err;
+  }
+
+  if(imgalloc(ctx, mem, img->img) < 0) goto err;
+
+  // default view
+  {
+    VkImageViewCreateInfo vi= {
+      .sType           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+      .image           = img->img,
+      .viewType        = VK_IMAGE_VIEW_TYPE_2D,
+      .format          = imgfmt_to_vk(desc.fmt),
+      .subresourceRange= {
+        .aspectMask= desc.fmt == GFXFMT_D32_SFLOAT ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                                   : VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel  = 0,
+        .levelCount    = 1,
+        .baseArrayLayer= 0,
+        .layerCount    = 1}};
+    OK(vkCreateImageView(ctx->dev, &vi, NULL, &img->view), goto err;)
+  }
+
+  img->desc= desc;
+  *out     = img;
+  return 0;
 err:
-	term_img(ctx, img);
+  term_img(ctx, img);
   return -1;
 }
 
-
-int  gfxinit_img(gfximg **o, gfxctx *c, gfxmem *m, gfxdesc_img d)
-{ return init_img(o, c, m, d); }
+int gfxinit_img(gfxctx *c, gfximg **o, gfxmem *m, gfxdesc_img d)
+{
+  return init_img(c, o, m, d);
+}
 void gfxterm_img(gfxctx *c, gfximg *i) { term_img(c, i); }
 
-static int init_mem(gfxmem **out, vkctx *ctx, usize bytes)
+static int init_mem(vkctx *ctx, gfxmem **out, usize bytes)
 {
   gfxmem *mem= NULL;
   if(!out || !ctx || !bytes) goto err;
@@ -690,10 +892,9 @@ static int init_mem(gfxmem **out, vkctx *ctx, usize bytes)
   mem= calloc(1, sizeof *mem);
   if(!mem) goto err;
 
-  VkMemoryPropertyFlags rbar_flags=
-    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  VkMemoryPropertyFlags rbar_flags= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
   if(arenainit(mem, ctx, bytes, rbar_flags) < 0)
     OK(arenainit(mem, ctx, bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
@@ -706,7 +907,7 @@ err:
   return -1;
 }
 
-static int init_mapped(gfxmem **out, vkctx *ctx, usize bytes, void **ptr)
+static int init_mapped(vkctx *ctx, gfxmem **out, usize bytes, void **ptr)
 {
   gfxmem *mem= NULL;
   if(!out || !ctx || !bytes || !ptr) goto err;
@@ -714,15 +915,17 @@ static int init_mapped(gfxmem **out, vkctx *ctx, usize bytes, void **ptr)
   mem= calloc(1, sizeof *mem);
   if(!mem) goto err;
 
-  VkMemoryPropertyFlags rbar_flags=
-    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  VkMemoryPropertyFlags rbar_flags= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
   if(arenainit(mem, ctx, bytes, rbar_flags) < 0)
-    OK(arenainit(mem, ctx, bytes,
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
+    OK(arenainit(
+         mem,
+         ctx,
+         bytes,
+         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
        goto err;)
 
   VkResult res= vkMapMemory(ctx->dev, mem->data, 0, bytes, 0, ptr);
@@ -745,10 +948,11 @@ static void term_mem(vkctx *ctx, gfxmem *mem)
   free(mem);
 }
 
-int  gfxinit_mem(gfxmem **o, gfxctx *c, usize b)
-{ return init_mem(o, c, b); }
-int  gfxinit_mapped(gfxmem **o, gfxctx *c, usize b, void **p)
-{ return init_mapped(o, c, b, p); }
+int gfxinit_mem(gfxctx *c, gfxmem **o, usize b) { return init_mem(c, o, b); }
+int gfxinit_mapped(gfxctx *c, gfxmem **o, usize b, void **p)
+{
+  return init_mapped(c, o, b, p);
+}
 void gfxterm_mem(gfxctx *c, gfxmem *m) { term_mem(c, m); }
 
 static int init_frame(vkctx *ctx)
@@ -1327,7 +1531,6 @@ int gfxprep(gfxctx *ctx, const u32 *spv, usize nrbytes)
 
   NNUL(ctx->vtxbuf, goto err;)
   OK(init_ppl(ctx, spv, nrbytes), goto err;)
-  OK(init_frame(ctx), goto err;)
 
   return 0;
 err:
@@ -1400,3 +1603,222 @@ static void printarenainfo(
   if(f & VK_MEMORY_PROPERTY_PROTECTED_BIT) printf(" PROTECTED");
   putchar('\n');
 }
+
+// -- pass / commands ----------------------------------------------------------
+
+static int init_pass(vkctx *ctx, gfxpass **out, gfxdesc_pass desc)
+{
+  (void)ctx;
+  gfxpass *p= NULL;
+
+  if(!out) goto err;
+
+  p= calloc(1, sizeof *p);
+  if(!p) goto err;
+
+  p->desc= desc;
+  *out   = p;
+  return 0;
+err:
+  free(p);
+  return -1;
+}
+
+static void term_pass(vkctx *ctx, gfxpass *p)
+{
+  (void)ctx;
+  if(!p) return;
+  memset(p, 0, sizeof *p);
+  free(p);
+}
+
+static void cmd_begin(gfxpass *p)
+{
+  p->nrdraws  = 0;
+  p->recording= 1;
+}
+
+static void cmd_draw(gfxpass *p, gfxdesc_drawcmd cmd)
+{
+  if(!p->recording) return;
+  if(p->nrdraws >= GFX_MAX_DRAWS) return;
+  p->draws[p->nrdraws++]= cmd;
+}
+
+static void cmd_end(gfxpass *p) { p->recording= 0; }
+
+static int submit(vkctx *ctx, gfxpass *p)
+{
+  NNUL(ctx && p, goto err;)
+
+  // figure out if offline or present
+  int present= 0;
+  {
+    for(usize i= 0; i < p->desc.nroutputs; i++)
+      if(p->desc.outputs[i] == DISPLAY_IMG)
+      {
+        present= 1;
+        break;
+      }
+  }
+  if(!present)
+  {
+    // return offline(...);
+  }
+
+  frmctx *frm= &ctx->frames[ctx->frmidx];
+  NNUL(frm, goto err;)
+
+  // prevent overriding commands
+  OK(vkWaitForFences(ctx->dev, 1, &frm->fence, VK_TRUE, UINT64_MAX), goto err;)
+
+  // acquire next image when available, async, may not return sequential index
+  u32 imgidx;
+  OK(vkAcquireNextImageKHR(
+       ctx->dev, ctx->swp, UINT64_MAX, frm->imggotten, VKNULL, &imgidx),
+     goto err;)
+
+  // record commands
+  {
+    vkResetCommandBuffer(frm->cmdbuf, 0);
+    VkCommandBufferBeginInfo binfo= {
+      .sType= VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    vkBeginCommandBuffer(frm->cmdbuf, &binfo);
+
+    VkImageMemoryBarrier2 renderbarriers[GFX_MAX_PASS_IMGS];
+    for(usize i= 0; i < p->desc.nroutputs; i++)
+      renderbarriers[i]= (VkImageMemoryBarrier2){
+        .sType              = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask       = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+        .dstStageMask       = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask      = VK_ACCESS_2_NONE,
+        .dstAccessMask      = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout          = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout          = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .srcQueueFamilyIndex= VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex= VK_QUEUE_FAMILY_IGNORED,
+        .image= p->desc.outputs[i] == DISPLAY_IMG ? ctx->swpimgs[imgidx]
+                                                  : p->desc.outputs[i]->img,
+        .subresourceRange= {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+
+    VkDependencyInfo renderd= {
+      .sType                  = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+      .imageMemoryBarrierCount= p->desc.nroutputs,
+      .pImageMemoryBarriers   = renderbarriers};
+    vkCmdPipelineBarrier2(frm->cmdbuf, &renderd);
+
+    VkRenderingAttachmentInfo attinfo[GFX_MAX_PASS_IMGS];
+    for(usize i= 0; i < p->desc.nroutputs; i++)
+      attinfo[i]= (VkRenderingAttachmentInfo){
+        .sType      = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView  = p->desc.outputs[i] == DISPLAY_IMG
+                        ? ctx->swpimgvs[imgidx]
+                        : p->desc.outputs[i]->view,
+        .imageLayout= VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .loadOp     = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .storeOp    = VK_ATTACHMENT_STORE_OP_STORE};
+
+    // TODO handle depth attachments
+    VkRenderingInfo renderinfo= {
+      .sType     = VK_STRUCTURE_TYPE_RENDERING_INFO,
+      .renderArea= {{0, 0}, ctx->swpextent},  // XXX this breaks for offline
+      .colorAttachmentCount= p->desc.nroutputs,
+      .pColorAttachments   = attinfo,
+      .layerCount          = 1};
+
+    vkCmdBeginRendering(frm->cmdbuf, &renderinfo);
+
+    // view port and scissor
+    VkViewport vp= {
+      0, 0, (f32)ctx->swpextent.width, (f32)ctx->swpextent.height, 0.f, 1.f};
+    vkCmdSetViewport(frm->cmdbuf, 0, 1, &vp);
+    VkRect2D scissor= {.extent= ctx->swpextent};
+    vkCmdSetScissor(frm->cmdbuf, 0, 1, &scissor);
+
+    for(usize i= 0; i < p->nrdraws; i++)
+    {
+      gfxdesc_drawcmd *dr= p->draws + i;
+
+      vkCmdBindPipeline(
+        frm->cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, dr->ppl->handle);
+
+      VkDeviceSize offs= 0;
+      vkCmdBindVertexBuffers(frm->cmdbuf, 0, 1, &dr->vtx->buf, &offs);
+      if(dr->idx)
+      {
+        vkCmdBindIndexBuffer(
+          frm->cmdbuf, dr->idx->buf, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(
+          frm->cmdbuf, dr->nridx, 1, dr->firstidx, dr->firstvtx, 0);
+      }
+      else
+        vkCmdDraw(frm->cmdbuf, dr->nrvtx, 1, dr->firstvtx, 0);
+    }
+    vkCmdEndRendering(frm->cmdbuf);
+    // present barrier
+    VkImageMemoryBarrier2 prsbarrier= {
+      .sType           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+      .srcStageMask    = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+      .dstStageMask    = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+      .srcAccessMask   = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+      .dstAccessMask   = VK_ACCESS_2_NONE,
+      .oldLayout       = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      .newLayout       = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+      .image           = ctx->swpimgs[imgidx],
+      .subresourceRange= {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    VkDependencyInfo prsd= {
+      .sType                  = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+      .imageMemoryBarrierCount= 1,
+      .pImageMemoryBarriers   = &prsbarrier};
+    vkCmdPipelineBarrier2(frm->cmdbuf, &prsd);
+    OK(vkEndCommandBuffer(frm->cmdbuf), goto err;)
+  }
+	VkSemaphoreSubmitInfo waitinfo= {
+		.sType    = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+		.stageMask= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+		.semaphore= frm->imggotten};
+	VkSemaphore subsem= ctx->frames[imgidx].renderfin;
+	VkSemaphoreSubmitInfo siginfo= {
+		.sType    = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+		.stageMask= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+		.semaphore= subsem};
+	VkCommandBufferSubmitInfo cmdinfo= {
+		.sType        = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+		.commandBuffer= frm->cmdbuf};
+	VkSubmitInfo2 subinfo= {
+		.sType                   = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+		.waitSemaphoreInfoCount  = 1,
+		.pWaitSemaphoreInfos     = &waitinfo,
+		.signalSemaphoreInfoCount= 1,
+		.pSignalSemaphoreInfos   = &siginfo,
+		.commandBufferInfoCount  = 1,
+		.pCommandBufferInfos     = &cmdinfo};
+  OK(vkResetFences(ctx->dev, 1, &frm->fence), goto err;)
+  OK(vkQueueSubmit2(ctx->gfxq, 1, &subinfo, frm->fence), goto err;)
+
+  // present
+  {
+    VkPresentInfoKHR info= {
+      .sType             = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+      .waitSemaphoreCount= 1,
+      .pWaitSemaphores   = &subsem,
+      .swapchainCount    = 1,
+      .pSwapchains       = &ctx->swp,
+      .pImageIndices     = &imgidx};
+    OK(vkQueuePresentKHR(ctx->prsq, &info), goto err;)
+  }
+  ctx->frmidx= (ctx->frmidx + 1) % ctx->nrframes;
+
+  return 0;
+err:
+  return -1;
+}
+int gfxinit_pass(gfxctx *c, gfxpass **o, gfxdesc_pass d)
+{
+  return init_pass(c, o, d);
+}
+void gfxterm_pass(gfxctx *c, gfxpass *p) { term_pass(c, p); }
+void gfxcmd_begin(gfxpass *p) { cmd_begin(p); }
+void gfxcmd_draw(gfxpass *p, gfxdesc_drawcmd d) { cmd_draw(p, d); }
+void gfxcmd_end(gfxpass *p) { cmd_end(p); }
+int  gfxsubmit(gfxctx *c, gfxpass *p) { return submit(c, p); }

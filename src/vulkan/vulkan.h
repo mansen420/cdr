@@ -89,6 +89,10 @@ typedef struct gfxctx
   vkarena  dfltpool;
   VkBuffer vtxbuf;
 
+  // offline submit
+  VkCommandBuffer offlinecmdbuf;
+  VkFence         offlinefence;
+
   // render state
   u32             frmidx;
   u32             absfrmidx;
@@ -140,8 +144,26 @@ struct gfxbuf
 
 struct gfximg
 {
-  VkImage    img;
+  VkImage     img;
+  VkImageView view;
   gfxdesc_img desc;
+};
+
+struct gfxppl
+{
+  VkPipeline       handle;
+  VkPipelineLayout layout;
+  gfxdesc_ppl      desc;
+};
+
+#define GFX_MAX_DRAWS 64
+
+struct gfxpass
+{
+  gfxdesc_pass    desc;
+  gfxdesc_drawcmd draws[GFX_MAX_DRAWS];
+  u32             nrdraws;
+  int             recording;
 };
 
 // internal — init/term
@@ -154,6 +176,22 @@ static int    reinit_swp(vkctx *ctx, i32 w_new, i32 h_new);
 
 // internal — process
 static int render(vkctx *ctx);
+
+// internal — pass / commands
+static int  init_pass(vkctx *, gfxpass **, gfxdesc_pass);
+static void term_pass(vkctx *, gfxpass *);
+static void cmd_begin(gfxpass *);
+static void cmd_draw(gfxpass *, gfxdesc_drawcmd);
+static void cmd_end(gfxpass *);
+static int  submit(vkctx *, gfxpass *);
+
+// internal — format helpers
+static VkFormat vtxfmt_to_vk(gfxfmt_vtx fmt);
+static VkFormat imgfmt_to_vk(gfxfmt_img fmt);
+
+// internal — pipeline
+static int  init_ppl_desc(vkctx *, gfxppl **, gfxdesc_ppl);
+static void term_ppl(vkctx *, gfxppl *);
 
 // internal — memory
 static int arenainit(

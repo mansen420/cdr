@@ -9,8 +9,8 @@ typedef struct gfxctx gfxctx;
 // -- memory -------------------------------------------------------------------
 typedef struct gfxmem gfxmem;
 
-int  gfxinit_mem(gfxmem **, gfxctx *, usize bytes);
-int  gfxinit_mapped(gfxmem **, gfxctx *, usize bytes, void **ptr);
+int  gfxinit_mem(gfxctx *, gfxmem **, usize bytes);
+int  gfxinit_mapped(gfxctx *, gfxmem **, usize bytes, void **ptr);
 void gfxterm_mem(gfxctx *, gfxmem *);
 
 // -- vertex buffer ------------------------------------------------------------
@@ -42,9 +42,11 @@ typedef struct
 
 typedef struct gfxbuf gfxbuf;
 
+//TODO add a gfxupbuffer() function and let user optionally pass in NULL
+// for data
 int gfxinit_vtxbuf(
-  gfxbuf **, gfxctx *, gfxmem *, gfxdesc_vtxbuf, const void *data);
-void gfxterm_vtxbuf(gfxctx *, gfxbuf *);
+  gfxctx *, gfxbuf **, gfxmem *, gfxdesc_vtxbuf, const void *data);
+void gfxterm_buf(gfxctx *, gfxbuf *);
 
 // -- image --------------------------------------------------------------------
 typedef enum
@@ -65,7 +67,7 @@ typedef struct
 
 typedef struct gfximg gfximg;
 
-int  gfxinit_img(gfximg **, gfxctx *, gfxmem *, gfxdesc_img);
+int  gfxinit_img(gfxctx *, gfximg **, gfxmem *, gfxdesc_img);
 void gfxterm_img(gfxctx *, gfximg *);
 
 gfximg *gfxget_display(gfxctx *);
@@ -80,7 +82,7 @@ typedef struct
 
 typedef struct gfxppl gfxppl;
 
-int  gfxinit_ppl(gfxppl **, gfxctx *, gfxdesc_ppl);
+int  gfxinit_ppl(gfxctx *, gfxppl **, gfxdesc_ppl);
 void gfxterm_ppl(gfxctx *, gfxppl *);
 
 // -- pass ---------------------------------------------------------------------
@@ -94,7 +96,7 @@ typedef struct
 
 typedef struct gfxpass gfxpass;
 
-int  gfxinit_pass(gfxpass **, gfxctx *, gfxdesc_pass);
+int  gfxinit_pass(gfxctx *, gfxpass **, gfxdesc_pass);
 void gfxterm_pass(gfxctx *, gfxpass *);
 
 // -- commands -----------------------------------------------------------------
@@ -107,6 +109,10 @@ typedef struct
   gfxbuf *idx;
   gfximg *inputs[GFX_MAX_DRAW_IMGS];
   u32     nrinputs;
+  u32     nrvtx;
+  u32     firstvtx;
+  u32     nridx;
+  u32     firstidx;
 } gfxdesc_drawcmd;
 
 void gfxcmd_begin(gfxpass *);
@@ -115,14 +121,22 @@ void gfxcmd_end(gfxpass *);
 int  gfxsubmit(gfxctx *, gfxpass *);
 
 // -- context ------------------------------------------------------------------
+
+enum
+{
+	GFX_NONE,
+	GFX_NO_IMPLICIT_MEM //don't use implicit context memory
+};
+
 typedef struct
 {
   usize      devmem;
   usize      hostmem;
-  u32        nrframes;
   gfxfmt_img swpfmt;
   u32        flags;
 } gfxdesc;
+//TODO make implicit context memory a bit more sophisticated
+// add autogrowth with slabs, garbage collection, etc.
 
 int  gfxinit(gfxctx **, dpyctx *, gfxdesc);
 void gfxterm(gfxctx *);
@@ -130,4 +144,6 @@ int  gfxqry_init(gfxctx *);
 void gfxpause(gfxctx *);
 void gfxresume(gfxctx *);
 void gfxupdate(gfxctx *, i32 w, i32 h);
+void gfxsync(gfxctx *);
 int  gfxprep(gfxctx *, const u32 *spv, usize nrbytes);
+int  gfxrender(gfxctx *, gfxpass *, u32 nrpasses); // legacy, remove when submit works
