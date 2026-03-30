@@ -48,7 +48,9 @@ int main(int argc, char **argv)
     .nrattrs  = 2,
     .nrvtx    = 3,
     .vtxstride= sizeof *triangle};
-  if(gfxinit_vtxbuf(gfx, &vtx, NULL, vtxdesc, triangle) < 0) goto exit;
+  gfxdesc_mem vtxdata= {
+    .data= triangle, .bytes= sizeof triangle, .offset= 0};
+  if(gfxinit_vtxbuf(gfx, &vtx, NULL, vtxdesc, vtxdata) < 0) goto exit;
 
   // prepare shader
   {

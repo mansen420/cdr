@@ -9,6 +9,13 @@ typedef struct gfxctx gfxctx;
 // -- memory -------------------------------------------------------------------
 typedef struct gfxmem gfxmem;
 
+typedef struct
+{
+  usize bytes;
+  usize offset;
+  void *data;
+} gfxdesc_mem;
+
 int  gfxinit_mem(gfxctx *, gfxmem **, usize bytes);
 int  gfxinit_mapped(gfxctx *, gfxmem **, usize bytes, void **ptr);
 void gfxterm_mem(gfxctx *, gfxmem *);
@@ -42,10 +49,8 @@ typedef struct
 
 typedef struct gfxbuf gfxbuf;
 
-//TODO add a gfxupbuffer() function and let user optionally pass in NULL
-// for data
-int gfxinit_vtxbuf(
-  gfxctx *, gfxbuf **, gfxmem *, gfxdesc_vtxbuf, const void *data);
+int  gfxinit_vtxbuf(gfxctx *, gfxbuf **, gfxmem *, gfxdesc_vtxbuf, gfxdesc_mem);
+int  gfxupload(gfxctx *, gfxbuf *, gfxmem *, gfxdesc_mem);
 void gfxterm_buf(gfxctx *, gfxbuf *);
 
 // -- image --------------------------------------------------------------------

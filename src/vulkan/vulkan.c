@@ -339,14 +339,14 @@ static int init(vkctx **out, void *dpy, gfxdesc desc)
   // implicit memory
   if(!desc.flags & GFX_NO_IMPLICIT_MEM)
   {
-		//TODO rather than default to 2MB, do lazy allozation and scale off the first
-		// request
-    if(!desc.devmem) desc.devmem= 2 * MB; 
+    // TODO rather than default to 2MB, do lazy allozation and scale off the
+    // first
+    //  request
+    if(!desc.devmem) desc.devmem= (usize)(2 * MB);
 
     VkMemoryPropertyFlags rbar_flags= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-
     if(arenainit(&ctx->dfltpool, ctx, desc.devmem, rbar_flags) < 0)
       OK(arenainit(
            &ctx->dfltpool,
@@ -533,8 +533,10 @@ static void term_ppl(vkctx *ctx, gfxppl *ppl)
   free(ppl);
 }
 
-int  gfxinit_ppl(gfxctx *c, gfxppl **o, gfxdesc_ppl d)
-{ return init_ppl_desc(c, o, d); }
+int gfxinit_ppl(gfxctx *c, gfxppl **o, gfxdesc_ppl d)
+{
+  return init_ppl_desc(c, o, d);
+}
 void gfxterm_ppl(gfxctx *c, gfxppl *p) { term_ppl(c, p); }
 
 int gfxinit(gfxctx **out, dpyctx *dpy, gfxdesc desc)
@@ -546,7 +548,7 @@ int     gfxqry_init(gfxctx *ctx) { return ctx && ctx->alive; }
 void    gfxpause(gfxctx *ctx) { ctx->pause= 1; }
 void    gfxresume(gfxctx *ctx) { ctx->pause= 0; }
 gfximg *gfxget_display(gfxctx *ctx) { return ctx->swp ? DISPLAY_IMG : NULL; }
-void gfxupdate(gfxctx *ctx, i32 w, i32 h)
+void    gfxupdate(gfxctx *ctx, i32 w, i32 h)
 {
   vkDeviceWaitIdle(ctx->dev);
   reinit_swp(ctx, w, h);
@@ -560,52 +562,84 @@ static void term_vtxbuf(gfxctx *ctx, gfxbuf *buf)
   free(buf);
 }
 
-static VkBuffer updata(vkctx *ctx, vkarena *dev, void *data, usize bytes)
+static int upload(vkctx *ctx, gfxbuf *buf, vkarena *arena, gfxdesc_mem mem)
 {
-  vkarena  host    = {0};
-  int      has_host= 0;
-  VkBuffer buf     = VKNULL;
+  int rc= -1;
 
-  if(!ctx || !dev || !data) goto err;
-  if(!bytes) goto exit;
+  NNUL(ctx, goto exit;)
+  NNUL(buf, goto exit;)
+  NNUL(buf->buf, goto exit;)
+  NNUL(arena, goto exit;)
+  NNUL(mem.data, goto exit;)
+  NNUL(mem.bytes, goto exit;)
+
+  usize bufsz= (usize)buf->desc.nrvtx * buf->desc.vtxstride;
+  IF(mem.offset + mem.bytes > bufsz, goto exit;)
 
   VkMemoryPropertyFlags rbar=
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-  if((dev->flags & rbar) == rbar)
-    buf= updata_direct(ctx, dev, data, bytes);
+  if((arena->flags & rbar) == rbar)
+    OK(updata_direct(
+         ctx, arena, buf->buf, buf->bindoff, mem.offset, mem.data, mem.bytes),
+       goto exit;)
   else
   {
-    OK(arenainit(&host, ctx, bytes, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT),
-       goto err;)
-    has_host= 1;
-    buf     = updata_staged(ctx, &host, dev, data, bytes);
+		// the required size may be larger than the logical size
+		VkMemoryRequirements reqs;
+		vkGetBufferMemoryRequirements(ctx->dev, buf->buf, &reqs);
+    vkarena host= {0};
+    OK(arenainit(&host, ctx, reqs.size, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT),
+       goto exit;)
+    OK(updata_staged(ctx, &host, buf->buf, mem.offset, mem.data, mem.bytes),
+       goto exit;)
+    arenaterm(ctx, &host);
   }
+
+  rc= 0;
 exit:
-  if(has_host) arenaterm(ctx, &host);
-  return buf;
-err:
-  if(has_host) arenaterm(ctx, &host);
-  return VKNULL;
+  return rc;
+}
+
+int gfxupload(gfxctx *c, gfxbuf *b, gfxmem *m, gfxdesc_mem d)
+{	
+	if(!m) m= &c->dfltpool;
+  return upload(c, b, m, d);
 }
 
 static int init_vtxbuf(
-  gfxctx *ctx, gfxbuf **out, gfxmem *mem, gfxdesc_vtxbuf desc, const void *data)
+  gfxctx *ctx, gfxbuf **out, gfxmem *mem, gfxdesc_vtxbuf desc, gfxdesc_mem up)
 {
   gfxbuf *buf= NULL;
-  if(!ctx || !data) goto err;
+  NNUL(ctx, goto err;)
   if(!mem)
-    if(!ctx->dfltpool.data)
-      goto err;
-    else
-      mem= &ctx->dfltpool;
+  {
+    NNUL(ctx->dfltpool.data, goto err;)
+    mem= &ctx->dfltpool;
+  }
 
   buf= calloc(1, sizeof *buf);
-  if(!buf) goto err;
+  NNUL(buf, goto err;)
 
-  buf->buf= updata(ctx, mem, (void *)data, (usize)desc.nrvtx * desc.vtxstride);
-  if(!buf->buf) goto err;
+  usize bytes= (usize)desc.nrvtx * desc.vtxstride;
+
+  // always create + bind
+  {
+    VkBufferCreateInfo info= {
+      .sType= VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+      .size = bytes,
+      .usage=
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT};
+    OK(vkCreateBuffer(ctx->dev, &info, NULL, &buf->buf), goto err;)
+    i64 off= bufferalloc(ctx, mem, buf->buf);
+    OK(off, goto err;)
+    buf->bindoff= (usize)off;
+  }
 
   buf->desc= desc;
+
+  // optional initial upload
+  if(up.data)
+    OK(upload(ctx, buf, mem, up) < 0, goto err;)
 
   *out= buf;
   return 0;
@@ -615,9 +649,9 @@ err:
 }
 
 int gfxinit_vtxbuf(
-  gfxctx *c, gfxbuf **o, gfxmem *m, gfxdesc_vtxbuf d, const void *data)
+  gfxctx *c, gfxbuf **o, gfxmem *m, gfxdesc_vtxbuf d, gfxdesc_mem up)
 {
-  return init_vtxbuf(c, o, m, d, data);
+  return init_vtxbuf(c, o, m, d, up);
 }
 void gfxterm_buf(gfxctx *c, gfxbuf *b) { term_vtxbuf(c, b); }
 
@@ -654,13 +688,20 @@ static VkFormat vtxfmt_to_vk(gfxfmt_vtx fmt)
 {
   switch(fmt)
   {
-    case GFXFMT_2F32: return VK_FORMAT_R32G32_SFLOAT;
-    case GFXFMT_3F32: return VK_FORMAT_R32G32B32_SFLOAT;
-    case GFXFMT_4F32: return VK_FORMAT_R32G32B32A32_SFLOAT;
-    case GFXFMT_2U8:  return VK_FORMAT_R8G8_UNORM;
-    case GFXFMT_3U8:  return VK_FORMAT_R8G8B8_UNORM;
-    case GFXFMT_4U8:  return VK_FORMAT_R8G8B8A8_UNORM;
-    default:          return VK_FORMAT_UNDEFINED;
+    case GFXFMT_2F32:
+      return VK_FORMAT_R32G32_SFLOAT;
+    case GFXFMT_3F32:
+      return VK_FORMAT_R32G32B32_SFLOAT;
+    case GFXFMT_4F32:
+      return VK_FORMAT_R32G32B32A32_SFLOAT;
+    case GFXFMT_2U8:
+      return VK_FORMAT_R8G8_UNORM;
+    case GFXFMT_3U8:
+      return VK_FORMAT_R8G8B8_UNORM;
+    case GFXFMT_4U8:
+      return VK_FORMAT_R8G8B8A8_UNORM;
+    default:
+      return VK_FORMAT_UNDEFINED;
   }
 }
 
@@ -1026,18 +1067,19 @@ static usize alignup(usize addr, usize align)
 }
 static i64 arena_suballoc(vkarena *arena, usize bytes, usize align)
 {
-  if(!arena) goto err;
+  NNUL(arena, goto err;)
 
   usize aligned      = alignup(arena->offset, align);
   usize alignoverhead= aligned - arena->offset;
   // coulda just checked on aligned >= size, but whatever
-  if(alignoverhead >= arena->size - arena->offset) goto err;
+  IF(alignoverhead >= arena->size - arena->offset, goto err;)
 
   // fragmentation occurs here, would be a good place to log
   arena->slop+= alignoverhead;
 
   usize free= arena->size - aligned;
-  if(bytes > free) goto err;
+	printf("SIZE: %lu; REQ: %lu", arena->size, bytes);
+  IF(bytes > free, goto err;)
 
   i64 res= (i64)aligned;
   arena->offset+= alignoverhead + bytes;
@@ -1048,28 +1090,29 @@ err:
 }
 static i64 bufferalloc(vkctx *ctx, vkarena *arena, VkBuffer buf)
 {
+  usize saved_offset= arena->offset;
+  usize saved_slop  = arena->slop;
+
   if(!ctx || !arena || !buf) return -1;
+	NNUL(ctx, goto err;)
+	NNUL(arena, goto err;)
+	NNUL(buf, goto err;)
 
   VkMemoryRequirements reqs;
   vkGetBufferMemoryRequirements(ctx->dev, buf, &reqs);
 
-  if(!(reqs.memoryTypeBits & (1U << arena->typeidx))) return -1;
-
-  usize saved_offset= arena->offset;
-  usize saved_slop  = arena->slop;
+  IF(!(reqs.memoryTypeBits & (1U << arena->typeidx)), goto err;)
 
   i64 offset= arena_suballoc(arena, reqs.size, reqs.alignment);
-  if(offset < 0) return -1;
+  IF(offset < 0, goto err;)
 
-  VkResult res= vkBindBufferMemory(ctx->dev, buf, arena->data, (usize)offset);
-  if(res != 0)
-  {
-    arena->offset= saved_offset;
-    arena->slop  = saved_slop;
-    return -1;
-  }
-
-  return offset;
+  OK(vkBindBufferMemory(ctx->dev, buf, arena->data, (usize)offset), goto err;)
+	
+	return offset;
+err:
+	arena->offset= saved_offset;
+	arena->slop  = saved_slop;
+  return -1;
 }
 
 static void arenaclear(vkarena *arena)
@@ -1084,35 +1127,26 @@ static void arenaterm(vkctx *ctx, vkarena *arena)
   memset(arena, 0, sizeof *arena);
 }
 
-static VkBuffer updata_staged(
-  vkctx *ctx, vkarena *host, vkarena *dev, const void *data, usize bytes)
+static int updata_staged(
+  vkctx      *ctx,
+  vkarena    *host,
+  VkBuffer    dst,
+  usize       dstoff,
+  const void *data,
+  usize       bytes)
 {
-  // function scope
-  VkBuffer        staging= VKNULL, buf= VKNULL;
-  VkCommandBuffer cmdbuf= VKNULL;
-  VkFence         fence = VKNULL;
-  VkResult        res;
+  VkBuffer staging= VKNULL;
+  VkResult res;
 
-  if(!ctx || !host || !dev || !data) goto err;
+  NNUL(ctx, goto err;)
+  NNUL(host, goto err;)
+  NNUL(dst, goto err;)
+  NNUL(data, goto err;)
+  NNUL(ctx->offlinecmdbuf, goto err;)
+  NNUL(ctx->offlinefence, goto err;)
+  IF(!(host->flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT), goto err;)
 
-  if(!ctx->gfxcmdpool) goto err;
-
-  if(!(host->flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) goto err;
-  if(!(dev->flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) goto err;
-
-  // create and bind device buffer
-  {
-    VkBufferCreateInfo info= {
-      .sType= VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-      .size = bytes,
-      .usage=
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT};
-    OK(vkCreateBuffer(ctx->dev, &info, NULL, &buf), goto err;)
-
-    i64 offset= bufferalloc(ctx, dev, buf);
-    if(offset < 0) goto err;
-  }
-  // create and bind staging buffer, and copy data
+  // create and bind staging buffer, copy data in
   {
     VkBufferCreateInfo info= {
       .sType= VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -1121,7 +1155,7 @@ static VkBuffer updata_staged(
     OK(vkCreateBuffer(ctx->dev, &info, NULL, &staging), goto err;)
 
     i64 offset= bufferalloc(ctx, host, staging);
-    if(offset < 0) goto err;
+    IF(offset < 0, goto err;)
 
     void *addr;
     OK(vkMapMemory(ctx->dev, host->data, (VkDeviceSize)offset, bytes, 0, &addr),
@@ -1130,86 +1164,66 @@ static VkBuffer updata_staged(
     vkUnmapMemory(ctx->dev, host->data);
   }
 
-  // create command buffer
-  {
-    VkCommandBufferAllocateInfo info= {
-      .sType             = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-      .commandPool       = ctx->gfxcmdpool,
-      .commandBufferCount= 1};
-    OK(vkAllocateCommandBuffers(ctx->dev, &info, &cmdbuf), goto err;)
-  }
-  // record cmds
+  // record copy
+  OK(vkWaitForFences(ctx->dev, 1, &ctx->offlinefence, VK_TRUE, UINT64_MAX),
+     goto err;)
+  OK(vkResetFences(ctx->dev, 1, &ctx->offlinefence), goto err;)
+  OK(vkResetCommandBuffer(ctx->offlinecmdbuf, 0), goto err;)
   {
     VkCommandBufferBeginInfo info= {
       .sType= VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
       .flags= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
-    OK(vkBeginCommandBuffer(cmdbuf, &info), goto err;)
-    VkBufferCopy copy= {.dstOffset= 0, .srcOffset= 0, .size= bytes};
-    vkCmdCopyBuffer(cmdbuf, staging, buf, 1, &copy);
-    vkEndCommandBuffer(cmdbuf);
+    OK(vkBeginCommandBuffer(ctx->offlinecmdbuf, &info), goto err;)
+    VkBufferCopy copy= {.dstOffset= dstoff, .srcOffset= 0, .size= bytes};
+    vkCmdCopyBuffer(ctx->offlinecmdbuf, staging, dst, 1, &copy);
+    OK(vkEndCommandBuffer(ctx->offlinecmdbuf), goto err;)
   }
-  // create fence
-  {
-    VkFenceCreateInfo info= {.sType= VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    OK(vkCreateFence(ctx->dev, &info, NULL, &fence), goto err;)
-  }
-  // submit cmds
+
+  // submit and wait
   {
     VkCommandBufferSubmitInfo cmdinfo= {
       .sType        = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-      .commandBuffer= cmdbuf};
+      .commandBuffer= ctx->offlinecmdbuf};
     VkSubmitInfo2 info= {
       .sType                 = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
       .commandBufferInfoCount= 1,
       .pCommandBufferInfos   = &cmdinfo};
-    OK(vkQueueSubmit2(ctx->gfxq, 1, &info, fence), goto err;)
+    OK(vkQueueSubmit2(ctx->gfxq, 1, &info, ctx->offlinefence), goto err;)
   }
-
-  OK(vkWaitForFences(ctx->dev, 1, &fence, VK_TRUE, UINT64_MAX), goto err;)
+  OK(vkWaitForFences(ctx->dev, 1, &ctx->offlinefence, VK_TRUE, UINT64_MAX),
+     goto err;)
 
   if(staging) vkDestroyBuffer(ctx->dev, staging, NULL);
-  if(cmdbuf) vkFreeCommandBuffers(ctx->dev, ctx->gfxcmdpool, 1, &cmdbuf);
-  if(fence) vkDestroyFence(ctx->dev, fence, NULL);
-  return buf;
+  return 0;
 err:
   if(staging) vkDestroyBuffer(ctx->dev, staging, NULL);
-  if(cmdbuf) vkFreeCommandBuffers(ctx->dev, ctx->gfxcmdpool, 1, &cmdbuf);
-  if(fence) vkDestroyFence(ctx->dev, fence, NULL);
-  if(buf) vkDestroyBuffer(ctx->dev, buf, NULL);
-  return VKNULL;
+  return -1;
 }
-static VkBuffer updata_direct(
-  vkctx *ctx, vkarena *mem, const void *data, usize bytes)
+static int updata_direct(
+  vkctx      *ctx,
+  vkarena    *mem,
+  VkBuffer    dst,
+  usize       bindoff,
+  usize       dstoff,
+  const void *data,
+  usize       bytes)
 {
-  VkBuffer buf= VKNULL;
   VkResult res;
+  void    *mapped= NULL;
 
-  if(
-    !ctx || !ctx->dev || !data ||
-    !(mem->flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
-    goto err;
+  NNUL(ctx, goto err;)
+  NNUL(ctx->dev, goto err;)
+  NNUL(data, goto err;)
+  NNUL(dst, goto err;)
+  IF(!(mem->flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT), goto err;)
 
-  VkBufferCreateInfo info= {
-    .sType      = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-    .usage      = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-    .size       = bytes,
-    .sharingMode= VK_SHARING_MODE_EXCLUSIVE};
-  res= vkCreateBuffer(ctx->dev, &info, NULL, &buf);
-  OK(res, goto err;)
-
-  i64 offset= bufferalloc(ctx, mem, buf);
-  if(offset < 0) goto err;
-
-  void *mapped;
-  res= vkMapMemory(ctx->dev, mem->data, (usize)offset, bytes, 0, &mapped);
-  OK(res, goto err;)
+  OK(vkMapMemory(ctx->dev, mem->data, bindoff + dstoff, bytes, 0, &mapped),
+     goto err;)
   memcpy(mapped, data, bytes);
   vkUnmapMemory(ctx->dev, mem->data);
-
-  return buf;
+  return 0;
 err:
-  if(buf) vkDestroyBuffer(ctx->dev, buf, NULL);
-  return VKNULL;
+  return -1;
 }
 
 static void printmeminfo(const vkctx *ctx)
@@ -1448,26 +1462,26 @@ static int submit(vkctx *ctx, gfxpass *p)
     vkCmdPipelineBarrier2(frm->cmdbuf, &prsd);
     OK(vkEndCommandBuffer(frm->cmdbuf), goto err;)
   }
-	VkSemaphoreSubmitInfo waitinfo= {
-		.sType    = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-		.stageMask= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-		.semaphore= frm->imggotten};
-	VkSemaphore subsem= ctx->frames[imgidx].renderfin;
-	VkSemaphoreSubmitInfo siginfo= {
-		.sType    = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-		.stageMask= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-		.semaphore= subsem};
-	VkCommandBufferSubmitInfo cmdinfo= {
-		.sType        = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-		.commandBuffer= frm->cmdbuf};
-	VkSubmitInfo2 subinfo= {
-		.sType                   = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-		.waitSemaphoreInfoCount  = 1,
-		.pWaitSemaphoreInfos     = &waitinfo,
-		.signalSemaphoreInfoCount= 1,
-		.pSignalSemaphoreInfos   = &siginfo,
-		.commandBufferInfoCount  = 1,
-		.pCommandBufferInfos     = &cmdinfo};
+  VkSemaphoreSubmitInfo waitinfo= {
+    .sType    = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+    .stageMask= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+    .semaphore= frm->imggotten};
+  VkSemaphore           subsem = ctx->frames[imgidx].renderfin;
+  VkSemaphoreSubmitInfo siginfo= {
+    .sType    = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+    .stageMask= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+    .semaphore= subsem};
+  VkCommandBufferSubmitInfo cmdinfo= {
+    .sType        = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+    .commandBuffer= frm->cmdbuf};
+  VkSubmitInfo2 subinfo= {
+    .sType                   = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+    .waitSemaphoreInfoCount  = 1,
+    .pWaitSemaphoreInfos     = &waitinfo,
+    .signalSemaphoreInfoCount= 1,
+    .pSignalSemaphoreInfos   = &siginfo,
+    .commandBufferInfoCount  = 1,
+    .pCommandBufferInfos     = &cmdinfo};
   OK(vkResetFences(ctx->dev, 1, &frm->fence), goto err;)
   OK(vkQueueSubmit2(ctx->gfxq, 1, &subinfo, frm->fence), goto err;)
 
