@@ -41,16 +41,17 @@ int main(int argc, char **argv)
     {.pos= {.x= 0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 1.f, .b= 0.f}},
     {.pos= {.x= -0.5f, .y= 0.5f}, .color= {.r= 0.f, .g= 0.f, .b= 1.f}}};
 
-  gfxdesc_vtxbuf vtxdesc= {
+  gfxdesc_bufbind vtxbind= {
+    .binding= 0,
+    .stride = sizeof *triangle,
+    .rate   = GFX_RATE_VERTEX,
     .attrs=
-      {(gfxvtxattr){.fmt= GFXFMT_2F32, .offset= 0},
-       (gfxvtxattr){.fmt= GFXFMT_3F32, .offset= 8}},
-    .nrattrs  = 2,
-    .nrvtx    = 3,
-    .vtxstride= sizeof *triangle};
-  gfxdesc_mem vtxdata= {
-    .data= triangle, .bytes= sizeof triangle, .offset= 0};
-  if(gfxinit_vtxbuf(gfx, &vtx, NULL, vtxdesc, vtxdata) < 0) goto exit;
+      {(gfxattr){.fmt= GFXFMT_2F32, .offset= 0},
+       (gfxattr){.fmt= GFXFMT_3F32, .offset= 8}},
+    .nrattrs= 2};
+  gfxdesc_buf bufdesc= {.nrelems= 3, .stride= sizeof *triangle};
+  gfxdesc_mem vtxdata= {.data= triangle, .bytes= sizeof triangle, .offset= 0};
+  if(gfxinit_buf(gfx, &vtx, NULL, bufdesc, vtxdata) < 0) goto exit;
 
   // prepare shader
   {
@@ -73,7 +74,9 @@ int main(int argc, char **argv)
       gfxinit_ppl(
         gfx,
         &ppl,
-        (gfxdesc_ppl){.spv= spv, .nrbytes= nrbytes, .vtxdesc= vtxdesc}) < 0)
+        (gfxdesc_ppl){
+          .spv= spv, .nrbytes= nrbytes, .bindings= {vtxbind}, .nrbindings= 1}) <
+      0)
       goto exit;
 
     free(spv);
@@ -96,7 +99,10 @@ int main(int argc, char **argv)
   {
     dpypoll(dpy);
     gfxcmd_begin(pass);
-    gfxcmd_draw(pass, (gfxdesc_drawcmd){.ppl= ppl, .vtx= vtx, .nrvtx= 3});
+    gfxcmd_draw(
+      pass,
+      (gfxdesc_drawcmd){
+        .ppl= ppl, .bufs= {{.binding= 0, .buf= vtx}}, .nrbufs= 1, .nrvtx= 3});
     gfxcmd_end(pass);
     if(gfxsubmit(gfx, pass) < 0) goto exit;
   }

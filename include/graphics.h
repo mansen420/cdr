@@ -20,8 +20,9 @@ int  gfxinit_mem(gfxctx *, gfxmem **, usize bytes);
 int  gfxinit_mapped(gfxctx *, gfxmem **, usize bytes, void **ptr);
 void gfxterm_mem(gfxctx *, gfxmem *);
 
-// -- vertex buffer ------------------------------------------------------------
-#define GFX_MAX_VTXATTRS 8
+// -- buffer -------------------------------------------------------------------
+#define GFX_MAX_ATTRS    8
+#define GFX_MAX_BINDINGS 8
 
 typedef enum
 {
@@ -31,25 +32,34 @@ typedef enum
   GFXFMT_2U8,
   GFXFMT_3U8,
   GFXFMT_4U8,
-} gfxfmt_vtx;
+} gfxfmt_attr;
 
 typedef struct
 {
-  u32        offset;
-  gfxfmt_vtx fmt;
-} gfxvtxattr;
+  u32         offset;
+  gfxfmt_attr fmt;
+} gfxattr;
+
+enum { GFX_RATE_VERTEX, GFX_RATE_INSTANCE };
 
 typedef struct
 {
-  u32        nrvtx;
-  u32        vtxstride;
-  gfxvtxattr attrs[GFX_MAX_VTXATTRS];
-  u32        nrattrs;
-} gfxdesc_vtxbuf;
+  u32     binding;
+  u32     stride;
+  u32     rate;   // GFX_RATE_VERTEX or GFX_RATE_INSTANCE
+  gfxattr attrs[GFX_MAX_ATTRS];
+  u32     nrattrs;
+} gfxdesc_bufbind;
+
+typedef struct
+{
+  u32 nrelems;  // number of vertices or instances
+  u32 stride;
+} gfxdesc_buf;
 
 typedef struct gfxbuf gfxbuf;
 
-int  gfxinit_vtxbuf(gfxctx *, gfxbuf **, gfxmem *, gfxdesc_vtxbuf, gfxdesc_mem);
+int  gfxinit_buf(gfxctx *, gfxbuf **, gfxmem *, gfxdesc_buf, gfxdesc_mem);
 int  gfxupload(gfxctx *, gfxbuf *, gfxmem *, gfxdesc_mem);
 void gfxterm_buf(gfxctx *, gfxbuf *);
 
@@ -80,9 +90,10 @@ gfximg *gfxget_display(gfxctx *);
 // -- pipeline -----------------------------------------------------------------
 typedef struct
 {
-  const u32     *spv;
-  usize          nrbytes;
-  gfxdesc_vtxbuf vtxdesc;
+  const u32      *spv;
+  usize           nrbytes;
+  gfxdesc_bufbind bindings[GFX_MAX_BINDINGS];
+  u32             nrbindings;
 } gfxdesc_ppl;
 
 typedef struct gfxppl gfxppl;
@@ -110,12 +121,15 @@ void gfxterm_pass(gfxctx *, gfxpass *);
 typedef struct
 {
   gfxppl *ppl;
-  gfxbuf *vtx;
+  struct { u32 binding; gfxbuf *buf; } bufs[GFX_MAX_BINDINGS];
+  u32     nrbufs;
   gfxbuf *idx;
   gfximg *inputs[GFX_MAX_DRAW_IMGS];
   u32     nrinputs;
   u32     nrvtx;
   u32     firstvtx;
+  u32     nrinst;
+  u32     firstinst;
   u32     nridx;
   u32     firstidx;
 } gfxdesc_drawcmd;

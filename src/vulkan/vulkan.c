@@ -428,25 +428,36 @@ static int init_ppl_desc(vkctx *ctx, gfxppl **out, gfxdesc_ppl desc)
      .module= module,
      .pName = "fragMain"}};
 
-  // vertex input from descriptor
-  VkVertexInputBindingDescription bind= {
-    .binding  = 0,
-    .stride   = desc.vtxdesc.vtxstride,
-    .inputRate= VK_VERTEX_INPUT_RATE_VERTEX};
+  // vertex input from bindings
+  VkVertexInputBindingDescription    binds[GFX_MAX_BINDINGS];
+  VkVertexInputAttributeDescription  attrs[GFX_MAX_BINDINGS * GFX_MAX_ATTRS];
+  u32 nrattrs= 0;
 
-  VkVertexInputAttributeDescription attrs[GFX_MAX_VTXATTRS];
-  for(u32 i= 0; i < desc.vtxdesc.nrattrs; i++)
-    attrs[i]= (VkVertexInputAttributeDescription){
-      .location= i,
-      .binding = 0,
-      .format  = vtxfmt_to_vk(desc.vtxdesc.attrs[i].fmt),
-      .offset  = desc.vtxdesc.attrs[i].offset};
+  for(u32 b= 0; b < desc.nrbindings; b++)
+  {
+    gfxdesc_bufbind *bd= &desc.bindings[b];
+    binds[b]= (VkVertexInputBindingDescription){
+      .binding  = bd->binding,
+      .stride   = bd->stride,
+      .inputRate= bd->rate == GFX_RATE_INSTANCE
+                    ? VK_VERTEX_INPUT_RATE_INSTANCE
+                    : VK_VERTEX_INPUT_RATE_VERTEX};
+    for(u32 a= 0; a < bd->nrattrs; a++)
+    {
+      attrs[nrattrs]= (VkVertexInputAttributeDescription){
+        .location= nrattrs,
+        .binding = bd->binding,
+        .format  = attrfmt_to_vk(bd->attrs[a].fmt),
+        .offset  = bd->attrs[a].offset};
+      nrattrs++;
+    }
+  }
 
   VkPipelineVertexInputStateCreateInfo inputinfo= {
     .sType= VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    .vertexBindingDescriptionCount  = 1,
-    .pVertexBindingDescriptions     = &bind,
-    .vertexAttributeDescriptionCount= desc.vtxdesc.nrattrs,
+    .vertexBindingDescriptionCount  = desc.nrbindings,
+    .pVertexBindingDescriptions     = binds,
+    .vertexAttributeDescriptionCount= nrattrs,
     .pVertexAttributeDescriptions   = attrs};
 
   VkPipelineInputAssemblyStateCreateInfo asminfo= {
@@ -555,7 +566,7 @@ void    gfxupdate(gfxctx *ctx, i32 w, i32 h)
 }
 void gfxsync(gfxctx *ctx) { vkDeviceWaitIdle(ctx->dev); }
 
-static void term_vtxbuf(gfxctx *ctx, gfxbuf *buf)
+static void term_buf(gfxctx *ctx, gfxbuf *buf)
 {
   if(!ctx || !buf) return;
   if(buf->buf) vkDestroyBuffer(ctx->dev, buf->buf, NULL);
@@ -573,7 +584,7 @@ static int upload(vkctx *ctx, gfxbuf *buf, vkarena *arena, gfxdesc_mem mem)
   NNUL(mem.data, goto exit;)
   NNUL(mem.bytes, goto exit;)
 
-  usize bufsz= (usize)buf->desc.nrvtx * buf->desc.vtxstride;
+  usize bufsz= (usize)buf->desc.nrelems * buf->desc.stride;
   IF(mem.offset + mem.bytes > bufsz, goto exit;)
 
   VkMemoryPropertyFlags rbar=
@@ -606,8 +617,8 @@ int gfxupload(gfxctx *c, gfxbuf *b, gfxmem *m, gfxdesc_mem d)
   return upload(c, b, m, d);
 }
 
-static int init_vtxbuf(
-  gfxctx *ctx, gfxbuf **out, gfxmem *mem, gfxdesc_vtxbuf desc, gfxdesc_mem up)
+static int init_buf(
+  gfxctx *ctx, gfxbuf **out, gfxmem *mem, gfxdesc_buf desc, gfxdesc_mem up)
 {
   gfxbuf *buf= NULL;
   NNUL(ctx, goto err;)
@@ -620,7 +631,7 @@ static int init_vtxbuf(
   buf= calloc(1, sizeof *buf);
   NNUL(buf, goto err;)
 
-  usize bytes= (usize)desc.nrvtx * desc.vtxstride;
+  usize bytes= (usize)desc.nrelems * desc.stride;
 
   // always create + bind
   {
@@ -639,21 +650,21 @@ static int init_vtxbuf(
 
   // optional initial upload
   if(up.data)
-    OK(upload(ctx, buf, mem, up) < 0, goto err;)
+    OK(upload(ctx, buf, mem, up), goto err;)
 
   *out= buf;
   return 0;
 err:
-  term_vtxbuf(ctx, buf);
+  term_buf(ctx, buf);
   return -1;
 }
 
-int gfxinit_vtxbuf(
-  gfxctx *c, gfxbuf **o, gfxmem *m, gfxdesc_vtxbuf d, gfxdesc_mem up)
+int gfxinit_buf(
+  gfxctx *c, gfxbuf **o, gfxmem *m, gfxdesc_buf d, gfxdesc_mem up)
 {
-  return init_vtxbuf(c, o, m, d, up);
+  return init_buf(c, o, m, d, up);
 }
-void gfxterm_buf(gfxctx *c, gfxbuf *b) { term_vtxbuf(c, b); }
+void gfxterm_buf(gfxctx *c, gfxbuf *b) { term_buf(c, b); }
 
 static void term_img(vkctx *ctx, gfximg *img)
 {
@@ -684,7 +695,7 @@ static VkFormat imgfmt_to_vk(gfxfmt_img fmt)
   }
 }
 
-static VkFormat vtxfmt_to_vk(gfxfmt_vtx fmt)
+static VkFormat attrfmt_to_vk(gfxfmt_attr fmt)
 {
   switch(fmt)
   {
@@ -1431,17 +1442,24 @@ static int submit(vkctx *ctx, gfxpass *p)
       vkCmdBindPipeline(
         frm->cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, dr->ppl->handle);
 
-      VkDeviceSize offs= 0;
-      vkCmdBindVertexBuffers(frm->cmdbuf, 0, 1, &dr->vtx->buf, &offs);
+      for(u32 b= 0; b < dr->nrbufs; b++)
+      {
+        VkDeviceSize off= 0;
+        vkCmdBindVertexBuffers(
+          frm->cmdbuf, dr->bufs[b].binding, 1, &dr->bufs[b].buf->buf, &off);
+      }
+
+      u32 inst= dr->nrinst ? dr->nrinst : 1;
       if(dr->idx)
       {
         vkCmdBindIndexBuffer(
           frm->cmdbuf, dr->idx->buf, 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(
-          frm->cmdbuf, dr->nridx, 1, dr->firstidx, dr->firstvtx, 0);
+          frm->cmdbuf, dr->nridx, inst, dr->firstidx, dr->firstvtx,
+          dr->firstinst);
       }
       else
-        vkCmdDraw(frm->cmdbuf, dr->nrvtx, 1, dr->firstvtx, 0);
+        vkCmdDraw(frm->cmdbuf, dr->nrvtx, inst, dr->firstvtx, dr->firstinst);
     }
     vkCmdEndRendering(frm->cmdbuf);
     // present barrier

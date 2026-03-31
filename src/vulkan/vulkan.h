@@ -23,11 +23,11 @@
     printf("NULL: %s (%s:%d)\n", #_expr, __FILE__, __LINE__); \
     DO                                                        \
   }
-#define IF(_expr, DO)                                         \
-  if(_expr)                                                    \
-  {                                                            \
+#define IF(_expr, DO)                                        \
+  if(_expr)                                                  \
+  {                                                          \
     printf("BAD: %s (%s:%d)\n", #_expr, __FILE__, __LINE__); \
-    DO                                                         \
+    DO                                                       \
   }
 
 #define ARENAS_MAX 32
@@ -129,9 +129,9 @@ typedef struct gfxctx
 
 struct gfxbuf
 {
-  VkBuffer       buf;
-  gfxdesc_vtxbuf desc;
-  usize          bindoff;
+  VkBuffer    buf;
+  gfxdesc_buf desc;
+  usize       bindoff;
 };
 
 struct gfximg
@@ -174,7 +174,7 @@ static void cmd_end(gfxpass *);
 static int  submit(vkctx *, gfxpass *);
 
 // internal — format helpers
-static VkFormat vtxfmt_to_vk(gfxfmt_vtx fmt);
+static VkFormat attrfmt_to_vk(gfxfmt_attr fmt);
 static VkFormat imgfmt_to_vk(gfxfmt_img fmt);
 
 // internal — pipeline
