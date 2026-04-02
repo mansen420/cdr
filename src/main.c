@@ -46,8 +46,8 @@ int main(int argc, char **argv)
     .stride = sizeof *triangle,
     .rate   = GFX_RATE_VERTEX,
     .attrs=
-      {(gfxattr){.fmt= GFXFMT_2F32, .offset= 0},
-       (gfxattr){.fmt= GFXFMT_3F32, .offset= 8}},
+      {(gfxattr){.location= 0, .fmt= GFXFMT_2F32, .offset= 0},
+       (gfxattr){.location= 1, .fmt= GFXFMT_3F32, .offset= 8}},
     .nrattrs= 2};
   gfxdesc_buf bufdesc= {.nrelems= 3, .stride= sizeof *triangle};
   gfxdesc_mem vtxdata= {.data= triangle, .bytes= sizeof triangle, .offset= 0};
@@ -75,8 +75,18 @@ int main(int argc, char **argv)
         gfx,
         &ppl,
         (gfxdesc_ppl){
-          .spv= spv, .nrbytes= nrbytes, .bindings= {vtxbind}, .nrbindings= 1}) <
-      0)
+          .program=
+            {{.spv      = spv,
+              .nrbytes  = nrbytes,
+              .stagebits= GFXSTAGE_VERT,
+              .entry    = "vertMain"},
+             {.spv      = spv,
+              .nrbytes  = nrbytes,
+              .stagebits= GFXSTAGE_FRAG,
+              .entry    = "fragMain"}},
+          .nrshaders = 2,
+          .bindings  = {vtxbind},
+          .nrbindings= 1}) < 0)
       goto exit;
 
     free(spv);

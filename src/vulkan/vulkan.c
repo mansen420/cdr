@@ -402,50 +402,60 @@ static void term(vkctx *ctx)
   free(ctx);
 }
 
-static int init_ppl_desc(vkctx *ctx, gfxppl **out, gfxdesc_ppl desc)
+static VkShaderStageFlags stage_to_vk(u32 bits)
 {
-  gfxppl        *ppl   = NULL;
-  VkShaderModule module= VKNULL;
-  if(!out || !ctx || !desc.spv || !desc.nrbytes) goto err;
+  VkShaderStageFlags f= 0;
+  if(bits & GFXSTAGE_VERT) f|= VK_SHADER_STAGE_VERTEX_BIT;
+  if(bits & GFXSTAGE_FRAG) f|= VK_SHADER_STAGE_FRAGMENT_BIT;
+  return f;
+}
+
+static int init_ppl(vkctx *ctx, gfxppl **out, gfxdesc_ppl desc)
+{
+  gfxppl        *ppl                     = NULL;
+  VkShaderModule modules[GFX_MAX_SHADERS]= {0};
+  NNUL(ctx, goto err;)
+  NNUL(out, goto err;)
+  NNUL(desc.nrshaders, goto err;)
 
   ppl= calloc(1, sizeof *ppl);
-  if(!ppl) goto err;
+  NNUL(ppl, goto err;)
+
+  VkPipelineShaderStageCreateInfo shaders[GFX_MAX_SHADERS];
   {
-    VkShaderModuleCreateInfo info= {
-      .sType   = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-      .codeSize= desc.nrbytes,
-      .pCode   = desc.spv};
-    OK(vkCreateShaderModule(ctx->dev, &info, NULL, &module), goto err;)
+    for(usize i= 0; i < desc.nrshaders; i++)
+    {
+      VkShaderModuleCreateInfo info= {
+        .sType   = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize= desc.program[i].nrbytes,
+        .pCode   = desc.program[i].spv};
+      OK(vkCreateShaderModule(ctx->dev, &info, NULL, &modules[i]), goto err;)
+
+      shaders[i]= (VkPipelineShaderStageCreateInfo){
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = stage_to_vk(desc.program[i].stagebits),
+        .module= modules[i],
+        .pName = desc.program[i].entry};
+    }
   }
 
-  VkPipelineShaderStageCreateInfo stages[2]= {
-    {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-     .stage = VK_SHADER_STAGE_VERTEX_BIT,
-     .module= module,
-     .pName = "vertMain"},
-    {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-     .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-     .module= module,
-     .pName = "fragMain"}};
-
   // vertex input from bindings
-  VkVertexInputBindingDescription    binds[GFX_MAX_BINDINGS];
-  VkVertexInputAttributeDescription  attrs[GFX_MAX_BINDINGS * GFX_MAX_ATTRS];
-  u32 nrattrs= 0;
+  VkVertexInputBindingDescription   binds[GFX_MAX_BINDINGS];
+  VkVertexInputAttributeDescription attrs[GFX_MAX_BINDINGS * GFX_MAX_ATTRS];
+  u32                               nrattrs= 0;
 
   for(u32 b= 0; b < desc.nrbindings; b++)
   {
     gfxdesc_bufbind *bd= &desc.bindings[b];
-    binds[b]= (VkVertexInputBindingDescription){
+    binds[b]           = (VkVertexInputBindingDescription){
       .binding  = bd->binding,
       .stride   = bd->stride,
-      .inputRate= bd->rate == GFX_RATE_INSTANCE
-                    ? VK_VERTEX_INPUT_RATE_INSTANCE
-                    : VK_VERTEX_INPUT_RATE_VERTEX};
+      .inputRate= bd->rate == GFX_RATE_INSTANCE ? VK_VERTEX_INPUT_RATE_INSTANCE
+                                                : VK_VERTEX_INPUT_RATE_VERTEX};
     for(u32 a= 0; a < bd->nrattrs; a++)
     {
       attrs[nrattrs]= (VkVertexInputAttributeDescription){
-        .location= nrattrs,
+        .location= bd->attrs[a].location,
         .binding = bd->binding,
         .format  = attrfmt_to_vk(bd->attrs[a].fmt),
         .offset  = bd->attrs[a].offset};
@@ -497,8 +507,20 @@ static int init_ppl_desc(vkctx *ctx, gfxppl **out, gfxdesc_ppl desc)
     .attachmentCount= 1,
     .pAttachments   = &blendattinfo};
 
+  VkPushConstantRange vkranges[GFX_MAX_RANGES];
+  u32                 nrranges= desc.nrranges;
+  for(u32 i= 0; i < nrranges; i++)
+  {
+    vkranges[i]= (VkPushConstantRange){
+      .stageFlags= stage_to_vk(desc.ranges[i].stages),
+      .offset    = desc.ranges[i].offset,
+      .size      = desc.ranges[i].bytes};
+  }
+
   VkPipelineLayoutCreateInfo plinfo= {
-    .sType= VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    .sType                 = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+    .pushConstantRangeCount= nrranges,
+    .pPushConstantRanges   = vkranges};
   OK(vkCreatePipelineLayout(ctx->dev, &plinfo, NULL, &ppl->layout), goto err;)
 
   VkPipelineRenderingCreateInfo rinfo= {
@@ -509,8 +531,8 @@ static int init_ppl_desc(vkctx *ctx, gfxppl **out, gfxdesc_ppl desc)
   VkGraphicsPipelineCreateInfo gfxinfo= {
     .sType              = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
     .pNext              = &rinfo,
-    .stageCount         = 2,
-    .pStages            = stages,
+    .stageCount         = desc.nrshaders,
+    .pStages            = shaders,
     .pVertexInputState  = &inputinfo,
     .pInputAssemblyState= &asminfo,
     .pViewportState     = &vpinfo,
@@ -523,14 +545,17 @@ static int init_ppl_desc(vkctx *ctx, gfxppl **out, gfxdesc_ppl desc)
        ctx->dev, VK_NULL_HANDLE, 1, &gfxinfo, NULL, &ppl->handle),
      goto err;)
 
-  vkDestroyShaderModule(ctx->dev, module, NULL);
+  for(usize i= 0; i < desc.nrshaders; i++)
+    if(modules[i]) vkDestroyShaderModule(ctx->dev, modules[i], NULL);
 
   ppl->desc= desc;
   *out     = ppl;
+
   return 0;
 err:
   if(ppl && ppl->layout) vkDestroyPipelineLayout(ctx->dev, ppl->layout, NULL);
-  if(module) vkDestroyShaderModule(ctx->dev, module, NULL);
+  for(usize i= 0; i < desc.nrshaders; i++)
+    if(modules[i]) vkDestroyShaderModule(ctx->dev, modules[i], NULL);
   free(ppl);
   return -1;
 }
@@ -546,7 +571,7 @@ static void term_ppl(vkctx *ctx, gfxppl *ppl)
 
 int gfxinit_ppl(gfxctx *c, gfxppl **o, gfxdesc_ppl d)
 {
-  return init_ppl_desc(c, o, d);
+  return init_ppl(c, o, d);
 }
 void gfxterm_ppl(gfxctx *c, gfxppl *p) { term_ppl(c, p); }
 
@@ -595,9 +620,9 @@ static int upload(vkctx *ctx, gfxbuf *buf, vkarena *arena, gfxdesc_mem mem)
        goto exit;)
   else
   {
-		// the required size may be larger than the logical size
-		VkMemoryRequirements reqs;
-		vkGetBufferMemoryRequirements(ctx->dev, buf->buf, &reqs);
+    // the required size may be larger than the logical size
+    VkMemoryRequirements reqs;
+    vkGetBufferMemoryRequirements(ctx->dev, buf->buf, &reqs);
     vkarena host= {0};
     OK(arenainit(&host, ctx, reqs.size, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT),
        goto exit;)
@@ -612,8 +637,8 @@ exit:
 }
 
 int gfxupload(gfxctx *c, gfxbuf *b, gfxmem *m, gfxdesc_mem d)
-{	
-	if(!m) m= &c->dfltpool;
+{
+  if(!m) m= &c->dfltpool;
   return upload(c, b, m, d);
 }
 
@@ -649,8 +674,7 @@ static int init_buf(
   buf->desc= desc;
 
   // optional initial upload
-  if(up.data)
-    OK(upload(ctx, buf, mem, up), goto err;)
+  if(up.data) OK(upload(ctx, buf, mem, up), goto err;)
 
   *out= buf;
   return 0;
@@ -659,8 +683,7 @@ err:
   return -1;
 }
 
-int gfxinit_buf(
-  gfxctx *c, gfxbuf **o, gfxmem *m, gfxdesc_buf d, gfxdesc_mem up)
+int gfxinit_buf(gfxctx *c, gfxbuf **o, gfxmem *m, gfxdesc_buf d, gfxdesc_mem up)
 {
   return init_buf(c, o, m, d, up);
 }
@@ -1089,7 +1112,7 @@ static i64 arena_suballoc(vkarena *arena, usize bytes, usize align)
   arena->slop+= alignoverhead;
 
   usize free= arena->size - aligned;
-	printf("SIZE: %lu; REQ: %lu", arena->size, bytes);
+  printf("SIZE: %lu; REQ: %lu", arena->size, bytes);
   IF(bytes > free, goto err;)
 
   i64 res= (i64)aligned;
@@ -1105,9 +1128,9 @@ static i64 bufferalloc(vkctx *ctx, vkarena *arena, VkBuffer buf)
   usize saved_slop  = arena->slop;
 
   if(!ctx || !arena || !buf) return -1;
-	NNUL(ctx, goto err;)
-	NNUL(arena, goto err;)
-	NNUL(buf, goto err;)
+  NNUL(ctx, goto err;)
+  NNUL(arena, goto err;)
+  NNUL(buf, goto err;)
 
   VkMemoryRequirements reqs;
   vkGetBufferMemoryRequirements(ctx->dev, buf, &reqs);
@@ -1118,11 +1141,11 @@ static i64 bufferalloc(vkctx *ctx, vkarena *arena, VkBuffer buf)
   IF(offset < 0, goto err;)
 
   OK(vkBindBufferMemory(ctx->dev, buf, arena->data, (usize)offset), goto err;)
-	
-	return offset;
+
+  return offset;
 err:
-	arena->offset= saved_offset;
-	arena->slop  = saved_slop;
+  arena->offset= saved_offset;
+  arena->slop  = saved_slop;
   return -1;
 }
 
@@ -1442,6 +1465,17 @@ static int submit(vkctx *ctx, gfxpass *p)
       vkCmdBindPipeline(
         frm->cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, dr->ppl->handle);
 
+      if(dr->push.mem.data && dr->push.mem.bytes)
+      {
+        vkCmdPushConstants(
+          frm->cmdbuf,
+          dr->ppl->layout,
+          stage_to_vk(dr->push.stages),
+          dr->push.mem.offset,
+          dr->push.mem.bytes,
+          dr->push.mem.data);
+      }
+
       for(u32 b= 0; b < dr->nrbufs; b++)
       {
         VkDeviceSize off= 0;
@@ -1455,7 +1489,11 @@ static int submit(vkctx *ctx, gfxpass *p)
         vkCmdBindIndexBuffer(
           frm->cmdbuf, dr->idx->buf, 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(
-          frm->cmdbuf, dr->nridx, inst, dr->firstidx, dr->firstvtx,
+          frm->cmdbuf,
+          dr->nridx,
+          inst,
+          dr->firstidx,
+          dr->firstvtx,
           dr->firstinst);
       }
       else
