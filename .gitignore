@@ -15,7 +15,6 @@
 !*.h
 !*.inl
 !*.slang
-!*.spv
 !*.vert
 !*.frag
 !*.md
