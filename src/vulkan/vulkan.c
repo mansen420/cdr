@@ -71,8 +71,7 @@ static int init_swp(vkctx *ctx, i32 w, i32 h)
   const VkPresentModeKHR *mode= NULL;
   for(unsigned i= 0; i < ctx->nrprsmodes; i++)
   {
-    if(ctx->prsmodes[i] == VK_PRESENT_MODE_MAILBOX_KHR)
-      mode= &ctx->prsmodes[i];
+    if(ctx->prsmodes[i] == VK_PRESENT_MODE_MAILBOX_KHR) mode= &ctx->prsmodes[i];
   }
   if(!mode) mode= &ctx->prsmodes[0];
 
@@ -110,8 +109,8 @@ static int init_swp(vkctx *ctx, i32 w, i32 h)
   // image views
   res= vkGetSwapchainImagesKHR(ctx->dev, ctx->swp, &ctx->nrswpimgs, NULL);
   OK(res, goto err;)
-  res= vkGetSwapchainImagesKHR(
-    ctx->dev, ctx->swp, &ctx->nrswpimgs, ctx->swpimgs);
+  res=
+    vkGetSwapchainImagesKHR(ctx->dev, ctx->swp, &ctx->nrswpimgs, ctx->swpimgs);
   OK(res, goto err;)
 
   for(unsigned i= 0; i < ctx->nrswpimgs; i++)
@@ -375,7 +374,7 @@ static int init(vkctx **out, void *dpy, gfxdesc desc)
 
   OK(init_frame(ctx), goto err;)
 
-	ctx->alive= 1;
+  ctx->alive= 1;
   *out      = ctx;
   return 0;
 err:
@@ -1348,7 +1347,6 @@ static int submit(vkctx *ctx, gfxpass *p)
       .layerCount          = 1};
 
     vkCmdBeginRendering(ctx->offlinecmdbuf, &renderinfo);
-
 
     VkViewport vp= {0, 0, (f32)extent.width, (f32)extent.height, 0.f, 1.f};
     vkCmdSetViewport(ctx->offlinecmdbuf, 0, 1, &vp);
