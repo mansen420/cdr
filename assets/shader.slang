@@ -1,14 +1,14 @@
-struct VertexInput {                                                              
-    [[vk::location(0)]] float2 pos;                                               
-    [[vk::location(1)]] float3 color;                                             
-};                                                                                
-                                                                                
-struct VertexOutput {                                                             
-    float3 color;                                                                 
-    float4 sv_position : SV_Position;                                             
-};                                                                                
-                                                                                
-[shader("vertex")]                                                                
+struct VertexInput {
+    [[vk::location(0)]] float2 pos;
+    [[vk::location(1)]] float3 color;
+};
+
+struct VertexOutput {
+    float3 color;
+    float4 sv_position : SV_Position;
+};
+
+[shader("vertex")]
 VertexOutput vertMain(VertexInput input) {
     VertexOutput output;
     output.sv_position = float4(input.pos, 0.0, 1.0);

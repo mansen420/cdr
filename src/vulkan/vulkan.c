@@ -12,6 +12,124 @@
 
 static const char *const VK_LAYER_VALID_NAME= "VK_LAYER_KHRONOS_validation";
 
+static int init_swp(vkctx *ctx, i32 w, i32 h)
+{
+  // tear down old views (no-op if VK_NULL_HANDLE)
+  for(unsigned i= 0; i < ctx->nrswpimgs; i++)
+    vkDestroyImageView(ctx->dev, ctx->swpimgvs[i], NULL);
+  memset(&ctx->swpimgvs, 0, sizeof ctx->swpimgvs);
+
+  // query surface
+  VkResult res= vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+    ctx->gpu, ctx->surf, &ctx->gpuscaps);
+  OK(res, goto err;)
+
+  res= vkGetPhysicalDeviceSurfaceFormatsKHR(
+    ctx->gpu, ctx->surf, &ctx->nrgpusfmts, NULL);
+  OK(res, goto err;)
+  res= vkGetPhysicalDeviceSurfaceFormatsKHR(
+    ctx->gpu, ctx->surf, &ctx->nrgpusfmts, ctx->gpusfmts);
+  OK(res, goto err;)
+
+  res= vkGetPhysicalDeviceSurfacePresentModesKHR(
+    ctx->gpu, ctx->surf, &ctx->nrprsmodes, NULL);
+  OK(res, goto err;)
+  if(ctx->nrprsmodes > 8) ctx->nrprsmodes= 8;
+  res= vkGetPhysicalDeviceSurfacePresentModesKHR(
+    ctx->gpu, ctx->surf, &ctx->nrprsmodes, ctx->prsmodes);
+  OK(res, goto err;)
+
+  // pick format
+  const VkSurfaceFormatKHR *chosen= &ctx->gpusfmts[0];
+  for(unsigned i= 0; i < ctx->nrgpusfmts; i++)
+    if(
+      ctx->gpusfmts[i].format == VK_FORMAT_B8G8R8A8_SRGB &&
+      ctx->gpusfmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+    {
+      chosen= &ctx->gpusfmts[i];
+      break;
+    }
+
+  // pick extent
+  VkExtent2D extent;
+  if(
+    ctx->gpuscaps.currentExtent.width == UINT32_MAX &&
+    ctx->gpuscaps.currentExtent.height == UINT32_MAX)
+  {
+    extent.width= (u32)w > ctx->gpuscaps.maxImageExtent.width
+                    ? ctx->gpuscaps.maxImageExtent.width
+                    : (u32)w;
+
+    extent.height= (u32)h > ctx->gpuscaps.maxImageExtent.height
+                     ? ctx->gpuscaps.maxImageExtent.height
+                     : (u32)h;
+  }
+  else
+    extent= ctx->gpuscaps.currentExtent;
+
+  // pick present mode
+  const VkPresentModeKHR *mode= NULL;
+  for(unsigned i= 0; i < ctx->nrprsmodes; i++)
+  {
+    if(ctx->prsmodes[i] == VK_PRESENT_MODE_MAILBOX_KHR)
+      mode= &ctx->prsmodes[i];
+  }
+  if(!mode) mode= &ctx->prsmodes[0];
+
+  // create swapchain
+  VkSwapchainCreateInfoKHR info= {
+    .sType           = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+    .surface         = ctx->surf,
+    .minImageCount   = ctx->gpuscaps.minImageCount + 1,  // XXX may break
+    .imageFormat     = chosen->format,
+    .imageColorSpace = chosen->colorSpace,
+    .imageExtent     = extent,
+    .imageArrayLayers= 1,
+    .imageUsage      = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                       VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+    .imageSharingMode=
+      ctx->gfxprs ? VK_SHARING_MODE_EXCLUSIVE : VK_SHARING_MODE_CONCURRENT,
+    .queueFamilyIndexCount= ctx->gfxprs ? 0 : 2,
+    .pQueueFamilyIndices  = ctx->gfxprs ? NULL : &ctx->gfxqfamidx,
+    .preTransform         = ctx->gpuscaps.currentTransform,
+    .compositeAlpha       = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+    .presentMode          = *mode,
+    .clipped              = VK_TRUE,
+    .oldSwapchain         = ctx->swp};
+
+  VkSwapchainKHR newswp;
+  res= vkCreateSwapchainKHR(ctx->dev, &info, NULL, &newswp);
+  OK(res, goto err;)
+
+  if(ctx->swp) vkDestroySwapchainKHR(ctx->dev, ctx->swp, NULL);
+  ctx->swp      = newswp;
+  ctx->swpsfmt  = *chosen;
+  ctx->swpextent= extent;
+
+  // image views
+  res= vkGetSwapchainImagesKHR(ctx->dev, ctx->swp, &ctx->nrswpimgs, NULL);
+  OK(res, goto err;)
+  res= vkGetSwapchainImagesKHR(
+    ctx->dev, ctx->swp, &ctx->nrswpimgs, ctx->swpimgs);
+  OK(res, goto err;)
+
+  for(unsigned i= 0; i < ctx->nrswpimgs; i++)
+  {
+    VkImageViewCreateInfo vinfo= {
+      .sType           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+      .image           = ctx->swpimgs[i],
+      .viewType        = VK_IMAGE_VIEW_TYPE_2D,
+      .format          = ctx->swpsfmt.format,
+      .subresourceRange= {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    res= vkCreateImageView(ctx->dev, &vinfo, NULL, &ctx->swpimgvs[i]);
+    OK(res, goto err;)
+  }
+  return 0;
+err:
+  return -1;
+}
+
 static int init(vkctx **out, void *dpy, gfxdesc desc)
 {
   vkctx *ctx= calloc(1, sizeof *ctx);
@@ -197,107 +315,7 @@ static int init(vkctx **out, void *dpy, gfxdesc desc)
     vkGetDeviceQueue(ctx->dev, ctx->gfxqfamidx, 0, &ctx->gfxq);
     vkGetDeviceQueue(ctx->dev, ctx->prsqfamidx, 0, &ctx->prsq);
   }
-  // swapchain
-  {
-    VkResult res= vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-      ctx->gpu, ctx->surf, &ctx->gpuscaps);
-    OK(res, goto err;)
-
-    res= vkGetPhysicalDeviceSurfaceFormatsKHR(
-      ctx->gpu, ctx->surf, &ctx->nrgpusfmts, NULL);
-    OK(res, goto err;)
-    res= vkGetPhysicalDeviceSurfaceFormatsKHR(
-      ctx->gpu, ctx->surf, &ctx->nrgpusfmts, ctx->gpusfmts);
-    OK(res, goto err;)
-
-    res= vkGetPhysicalDeviceSurfacePresentModesKHR(
-      ctx->gpu, ctx->surf, &ctx->nrprsmodes, NULL);
-    OK(res, goto err;)
-    if(ctx->nrprsmodes > 8) ctx->nrprsmodes= 8;
-
-    res= vkGetPhysicalDeviceSurfacePresentModesKHR(
-      ctx->gpu, ctx->surf, &ctx->nrprsmodes, ctx->prsmodes);
-    OK(res, goto err;)
-
-    const VkSurfaceFormatKHR *chosen= &ctx->gpusfmts[0];
-    for(unsigned i= 0; i < ctx->nrgpusfmts; i++)
-      if(
-        ctx->gpusfmts[i].format == VK_FORMAT_B8G8R8A8_SRGB &&
-        ctx->gpusfmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
-      {
-        chosen= &ctx->gpusfmts[i];
-        break;
-      }
-
-    VkExtent2D extent;
-    if(
-      ctx->gpuscaps.currentExtent.width == UINT32_MAX &&
-      ctx->gpuscaps.currentExtent.height == UINT32_MAX)
-    {
-      extent.width= 800 > ctx->gpuscaps.maxImageExtent.width
-                      ? ctx->gpuscaps.maxImageExtent.width
-                      : 800;
-
-      extent.height= 600 > ctx->gpuscaps.maxImageExtent.height
-                       ? ctx->gpuscaps.maxImageExtent.height
-                       : 600;
-    }
-    else
-      extent= ctx->gpuscaps.currentExtent;
-
-    const VkPresentModeKHR *mode= NULL;
-    for(unsigned i= 0; i < ctx->nrprsmodes; i++)
-    {
-      if(ctx->prsmodes[i] == VK_PRESENT_MODE_MAILBOX_KHR)
-        mode= &ctx->prsmodes[i];
-    }
-    if(!mode) mode= &ctx->prsmodes[0];
-
-    VkSwapchainCreateInfoKHR info= {
-      .sType           = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-      .surface         = ctx->surf,
-      .minImageCount   = ctx->gpuscaps.minImageCount + 1,  // XXX may break
-      .imageFormat     = chosen->format,
-      .imageColorSpace = chosen->colorSpace,
-      .imageExtent     = extent,
-      .imageArrayLayers= 1,
-      .imageUsage      = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-      .imageSharingMode=
-        ctx->gfxprs ? VK_SHARING_MODE_EXCLUSIVE : VK_SHARING_MODE_CONCURRENT,
-      .queueFamilyIndexCount= ctx->gfxprs ? 0 : 2,
-      .pQueueFamilyIndices  = ctx->gfxprs ? NULL : &ctx->gfxqfamidx,
-      .preTransform         = ctx->gpuscaps.currentTransform,
-      .compositeAlpha       = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-      .presentMode          = *mode,
-      .clipped              = VK_TRUE,
-      .oldSwapchain         = VK_NULL_HANDLE};
-
-    res= vkCreateSwapchainKHR(ctx->dev, &info, NULL, &ctx->swp);
-    OK(res, goto err;)
-    ctx->swpsfmt  = *chosen;
-    ctx->swpextent= extent;
-  }
-  // img views
-  {
-    VkResult res=
-      vkGetSwapchainImagesKHR(ctx->dev, ctx->swp, &ctx->nrswpimgs, NULL);
-    OK(res, goto err;)
-    res= vkGetSwapchainImagesKHR(
-      ctx->dev, ctx->swp, &ctx->nrswpimgs, ctx->swpimgs);
-    OK(res, goto err;)
-
-    for(unsigned i= 0; i < ctx->nrswpimgs; i++)
-    {
-      VkImageViewCreateInfo info= {
-        .sType           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image           = ctx->swpimgs[i],
-        .viewType        = VK_IMAGE_VIEW_TYPE_2D,
-        .format          = ctx->swpsfmt.format,
-        .subresourceRange= {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
-      res= vkCreateImageView(ctx->dev, &info, NULL, &ctx->swpimgvs[i]);
-      OK(res, goto err;)
-    }
-  }
+  OK(init_swp(ctx, 800, 600), goto err;)
   // cmd pools
   {
     VkResult                res;
@@ -347,18 +365,17 @@ static int init(vkctx **out, void *dpy, gfxdesc desc)
     VkMemoryPropertyFlags rbar_flags= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    if(arenainit(&ctx->dfltpool, ctx, desc.devmem, rbar_flags) < 0)
-      OK(arenainit(
-           &ctx->dfltpool,
-           ctx,
-           desc.devmem,
-           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
-         goto err;)
+    OK(arenainit(
+         &ctx->dfltpool.base,
+         ctx,
+         desc.devmem,
+         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
+       goto err;)
   }
 
   OK(init_frame(ctx), goto err;)
 
-  ctx->alive= 1;
+	ctx->alive= 1;
   *out      = ctx;
   return 0;
 err:
@@ -387,7 +404,7 @@ static void term(vkctx *ctx)
   vkDeviceWaitIdle(ctx->dev);
 
   if(ctx->offlinefence) vkDestroyFence(ctx->dev, ctx->offlinefence, NULL);
-  arenaterm(ctx, &ctx->dfltpool);
+  arenaterm(ctx, &ctx->dfltpool.base);
   for(unsigned i= 0; i < ctx->nrframes; i++) term_frame(ctx, i);
   if(ctx->prscmdpool) vkDestroyCommandPool(ctx->dev, ctx->prscmdpool, NULL);
   if(ctx->gfxcmdpool) vkDestroyCommandPool(ctx->dev, ctx->gfxcmdpool, NULL);
@@ -615,9 +632,11 @@ static int upload(vkctx *ctx, gfxbuf *buf, vkarena *arena, gfxdesc_mem mem)
   VkMemoryPropertyFlags rbar=
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
   if((arena->flags & rbar) == rbar)
+  {
     OK(updata_direct(
          ctx, arena, buf->buf, buf->bindoff, mem.offset, mem.data, mem.bytes),
        goto exit;)
+  }
   else
   {
     // the required size may be larger than the logical size
@@ -638,7 +657,7 @@ exit:
 
 int gfxupload(gfxctx *c, gfxbuf *b, gfxmem *m, gfxdesc_mem d)
 {
-  if(!m) m= &c->dfltpool;
+  if(!m) m= &c->dfltpool.base;
   return upload(c, b, m, d);
 }
 
@@ -649,8 +668,8 @@ static int init_buf(
   NNUL(ctx, goto err;)
   if(!mem)
   {
-    NNUL(ctx->dfltpool.data, goto err;)
-    mem= &ctx->dfltpool;
+    NNUL(ctx->dfltpool.base.data, goto err;)
+    mem= &ctx->dfltpool.base;
   }
 
   buf= calloc(1, sizeof *buf);
@@ -741,42 +760,45 @@ static VkFormat attrfmt_to_vk(gfxfmt_attr fmt)
 
 static i64 imgalloc(vkctx *ctx, vkarena *arena, VkImage img)
 {
-  if(!ctx || !arena || !img) return -1;
+  i64 rc= -1;
+
+  NNUL(ctx, goto exit;)
+  NNUL(arena, goto exit;)
+  NNUL(img, goto exit;)
 
   VkMemoryRequirements reqs;
   vkGetImageMemoryRequirements(ctx->dev, img, &reqs);
 
-  if(!(reqs.memoryTypeBits & (1U << arena->typeidx))) return -1;
+  IF(!(reqs.memoryTypeBits & (1U << arena->typeidx)), goto exit;)
 
   usize saved_offset= arena->offset;
   usize saved_slop  = arena->slop;
 
   i64 offset= arena_suballoc(arena, reqs.size, reqs.alignment);
-  if(offset < 0) return -1;
+  OK(offset, goto exit;)
 
   VkResult res= vkBindImageMemory(ctx->dev, img, arena->data, (usize)offset);
   if(res != 0)
   {
     arena->offset= saved_offset;
     arena->slop  = saved_slop;
-    return -1;
+    OK(res, goto exit;)
   }
 
-  return offset;
+  rc= offset;
+exit:
+  return rc;
 }
-static int init_img(vkctx *ctx, gfximg **out, gfxmem *mem, gfxdesc_img desc)
+static int init_img(vkctx *ctx, gfximg **out, gfxmem_dev *mem, gfxdesc_img desc)
 {
-  gfximg  *img= NULL;
-  VkResult res;
-  if(!ctx || !out) goto err;
-  if(!mem)
-    if(!ctx->dfltpool.data)
-      goto err;
-    else
-      mem= &ctx->dfltpool;
+  gfximg *img= NULL;
+  NNUL(ctx, goto err;)
+  NNUL(out, goto err;)
+  if(!mem) mem= &ctx->dfltpool;
+  NNUL(mem->base.data, goto err;)
 
   img= calloc(1, sizeof *img);
-  if(!img) goto err;
+  NNUL(img, goto err;)
 
   {
     VkImageCreateInfo info= {
@@ -784,16 +806,17 @@ static int init_img(vkctx *ctx, gfximg **out, gfxmem *mem, gfxdesc_img desc)
       .imageType= VK_IMAGE_TYPE_2D,
       .extent   = {desc.w, desc.h, 1},
       .tiling   = VK_IMAGE_TILING_OPTIMAL,
-      .usage    = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .usage    = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
       .format   = imgfmt_to_vk(desc.fmt),
       .mipLevels= 1,
       .arrayLayers= 1,
       .samples    = VK_SAMPLE_COUNT_1_BIT};
-    res= vkCreateImage(ctx->dev, &info, NULL, &img->img);
-    if(res < 0) goto err;
+    OK(vkCreateImage(ctx->dev, &info, NULL, &img->img), goto err;)
   }
 
-  if(imgalloc(ctx, mem, img->img) < 0) goto err;
+  OK(imgalloc(ctx, &mem->base, img->img), goto err;)
 
   // default view
   {
@@ -820,7 +843,7 @@ err:
   return -1;
 }
 
-int gfxinit_img(gfxctx *c, gfximg **o, gfxmem *m, gfxdesc_img d)
+int gfxinit_img(gfxctx *c, gfximg **o, gfxmem_dev *m, gfxdesc_img d)
 {
   return init_img(c, o, m, d);
 }
@@ -937,116 +960,7 @@ err:
 static int reinit_swp(vkctx *ctx, i32 w_new, i32 h_new)
 {
   if(!ctx) goto err;
-
-  for(unsigned i= 0; i < ctx->nrswpimgs; i++)
-    vkDestroyImageView(ctx->dev, ctx->swpimgvs[i], NULL);
-  memset(&ctx->swpimgvs, 0, sizeof ctx->swpimgvs);
-
-  // swapchain
-  {
-    VkResult res= vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-      ctx->gpu, ctx->surf, &ctx->gpuscaps);
-    OK(res, goto err;)
-
-    res= vkGetPhysicalDeviceSurfaceFormatsKHR(
-      ctx->gpu, ctx->surf, &ctx->nrgpusfmts, NULL);
-    OK(res, goto err;)
-    res= vkGetPhysicalDeviceSurfaceFormatsKHR(
-      ctx->gpu, ctx->surf, &ctx->nrgpusfmts, ctx->gpusfmts);
-    OK(res, goto err;)
-
-    res= vkGetPhysicalDeviceSurfacePresentModesKHR(
-      ctx->gpu, ctx->surf, &ctx->nrprsmodes, NULL);
-    OK(res, goto err;)
-    if(ctx->nrprsmodes > 8) ctx->nrprsmodes= 8;
-    res= vkGetPhysicalDeviceSurfacePresentModesKHR(
-      ctx->gpu, ctx->surf, &ctx->nrprsmodes, ctx->prsmodes);
-    OK(res, goto err;)
-
-    const VkSurfaceFormatKHR *chosen= &ctx->gpusfmts[0];
-    for(unsigned i= 0; i < ctx->nrgpusfmts; i++)
-      if(
-        ctx->gpusfmts[i].format == VK_FORMAT_B8G8R8A8_SRGB &&
-        ctx->gpusfmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
-      {
-        chosen= &ctx->gpusfmts[i];
-        break;
-      }
-
-    // TODO replace (800, 600) with paramterized defaults
-    VkExtent2D extent;
-    if(
-      ctx->gpuscaps.currentExtent.width == UINT32_MAX &&
-      ctx->gpuscaps.currentExtent.height == UINT32_MAX)
-    {
-      extent.width= w_new > ctx->gpuscaps.maxImageExtent.width
-                      ? ctx->gpuscaps.maxImageExtent.width
-                      : w_new;
-
-      extent.height= h_new > ctx->gpuscaps.maxImageExtent.height
-                       ? ctx->gpuscaps.maxImageExtent.height
-                       : h_new;
-    }
-    else
-      extent= ctx->gpuscaps.currentExtent;
-
-    const VkPresentModeKHR *mode= NULL;
-    for(unsigned i= 0; i < ctx->nrprsmodes; i++)
-    {
-      if(ctx->prsmodes[i] == VK_PRESENT_MODE_MAILBOX_KHR)
-        mode= &ctx->prsmodes[i];
-    }
-    if(!mode) mode= &ctx->prsmodes[0];
-
-    VkSwapchainCreateInfoKHR info= {
-      .sType           = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-      .surface         = ctx->surf,
-      .minImageCount   = ctx->gpuscaps.minImageCount + 1,  // XXX may break
-      .imageFormat     = chosen->format,
-      .imageColorSpace = chosen->colorSpace,
-      .imageExtent     = extent,
-      .imageArrayLayers= 1,
-      .imageUsage      = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-      .imageSharingMode=
-        ctx->gfxprs ? VK_SHARING_MODE_EXCLUSIVE : VK_SHARING_MODE_CONCURRENT,
-      .queueFamilyIndexCount= ctx->gfxprs ? 0 : 2,
-      .pQueueFamilyIndices  = ctx->gfxprs ? NULL : &ctx->gfxqfamidx,
-      .preTransform         = ctx->gpuscaps.currentTransform,
-      .compositeAlpha       = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-      .presentMode          = *mode,
-      .clipped              = VK_TRUE,
-      .oldSwapchain         = ctx->swp};
-
-    VkSwapchainKHR temp;
-    res= vkCreateSwapchainKHR(ctx->dev, &info, NULL, &temp);
-    OK(res, goto err;)
-    vkDestroySwapchainKHR(ctx->dev, ctx->swp, NULL);
-    ctx->swp      = temp;
-    ctx->swpsfmt  = *chosen;
-    ctx->swpextent= extent;
-  }
-
-  // img views
-  {
-    VkResult res=
-      vkGetSwapchainImagesKHR(ctx->dev, ctx->swp, &ctx->nrswpimgs, NULL);
-    OK(res, goto err;)
-    res= vkGetSwapchainImagesKHR(
-      ctx->dev, ctx->swp, &ctx->nrswpimgs, ctx->swpimgs);
-    OK(res, goto err;)
-
-    for(unsigned i= 0; i < ctx->nrswpimgs; i++)
-    {
-      VkImageViewCreateInfo info= {
-        .sType           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image           = ctx->swpimgs[i],
-        .viewType        = VK_IMAGE_VIEW_TYPE_2D,
-        .format          = ctx->swpsfmt.format,
-        .subresourceRange= {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
-      res= vkCreateImageView(ctx->dev, &info, NULL, &ctx->swpimgvs[i]);
-      OK(res, goto err;)
-    }
-  }
+  OK(init_swp(ctx, w_new, h_new), goto err;)
   return 0;
 err:
   return -1;
@@ -1355,6 +1269,11 @@ static void term_pass(vkctx *ctx, gfxpass *p)
   free(p);
 }
 
+// TODO command recording refactor:
+//  - gfxcmd_draw takes array of gfxdesc_drawcmd
+//  - cmd_end() records Vulkan commands (sort by pipeline, batch adjacent draws)
+//  - submit() only re-records for display passes (swapchain index changes);
+//    offline passes reuse the recorded command buffer if not dirty
 static void cmd_begin(gfxpass *p)
 {
   p->nrdraws  = 0;
@@ -1373,102 +1292,80 @@ static void cmd_end(gfxpass *p) { p->recording= 0; }
 static int submit(vkctx *ctx, gfxpass *p)
 {
   NNUL(ctx && p, goto err;)
+  IF(!p->desc.nroutputs, goto err;)
 
-  // figure out if offline or present
-  int present= 0;
-  {
-    for(usize i= 0; i < p->desc.nroutputs; i++)
-      if(p->desc.outputs[i] == DISPLAY_IMG)
-      {
-        present= 1;
-        break;
-      }
-  }
-  if(!present)
-  {
-    // return offline(...);
-  }
+  // use first output image to determine render area
+  gfximg *out0= p->desc.outputs[0];
+  NNUL(out0, goto err;)
+  VkExtent2D extent= {out0->desc.w, out0->desc.h};
 
-  frmctx *frm= &ctx->frames[ctx->frmidx];
-  NNUL(frm, goto err;)
-
-  // prevent overriding commands
-  OK(vkWaitForFences(ctx->dev, 1, &frm->fence, VK_TRUE, UINT64_MAX), goto err;)
-
-  // acquire next image when available, async, may not return sequential index
-  u32 imgidx;
-  OK(vkAcquireNextImageKHR(
-       ctx->dev, ctx->swp, UINT64_MAX, frm->imggotten, VKNULL, &imgidx),
+  OK(vkWaitForFences(ctx->dev, 1, &ctx->offlinefence, VK_TRUE, UINT64_MAX),
      goto err;)
+  OK(vkResetFences(ctx->dev, 1, &ctx->offlinefence), goto err;)
+  OK(vkResetCommandBuffer(ctx->offlinecmdbuf, 0), goto err;)
 
   // record commands
   {
-    vkResetCommandBuffer(frm->cmdbuf, 0);
     VkCommandBufferBeginInfo binfo= {
-      .sType= VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    vkBeginCommandBuffer(frm->cmdbuf, &binfo);
+      .sType= VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+      .flags= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
+    OK(vkBeginCommandBuffer(ctx->offlinecmdbuf, &binfo), goto err;)
 
     VkImageMemoryBarrier2 renderbarriers[GFX_MAX_PASS_IMGS];
     for(usize i= 0; i < p->desc.nroutputs; i++)
       renderbarriers[i]= (VkImageMemoryBarrier2){
-        .sType              = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask       = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-        .dstStageMask       = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask      = VK_ACCESS_2_NONE,
-        .dstAccessMask      = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .oldLayout          = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout          = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .srcQueueFamilyIndex= VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex= VK_QUEUE_FAMILY_IGNORED,
-        .image= p->desc.outputs[i] == DISPLAY_IMG ? ctx->swpimgs[imgidx]
-                                                  : p->desc.outputs[i]->img,
+        .sType           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask    = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+        .dstStageMask    = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask   = VK_ACCESS_2_NONE,
+        .dstAccessMask   = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout       = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout       = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .image           = p->desc.outputs[i]->img,
         .subresourceRange= {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
 
     VkDependencyInfo renderd= {
       .sType                  = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
       .imageMemoryBarrierCount= p->desc.nroutputs,
       .pImageMemoryBarriers   = renderbarriers};
-    vkCmdPipelineBarrier2(frm->cmdbuf, &renderd);
+    vkCmdPipelineBarrier2(ctx->offlinecmdbuf, &renderd);
 
     VkRenderingAttachmentInfo attinfo[GFX_MAX_PASS_IMGS];
     for(usize i= 0; i < p->desc.nroutputs; i++)
       attinfo[i]= (VkRenderingAttachmentInfo){
         .sType      = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView  = p->desc.outputs[i] == DISPLAY_IMG
-                        ? ctx->swpimgvs[imgidx]
-                        : p->desc.outputs[i]->view,
+        .imageView  = p->desc.outputs[i]->view,
         .imageLayout= VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .loadOp     = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
         .storeOp    = VK_ATTACHMENT_STORE_OP_STORE};
 
     // TODO handle depth attachments
     VkRenderingInfo renderinfo= {
-      .sType     = VK_STRUCTURE_TYPE_RENDERING_INFO,
-      .renderArea= {{0, 0}, ctx->swpextent},  // XXX this breaks for offline
+      .sType               = VK_STRUCTURE_TYPE_RENDERING_INFO,
+      .renderArea          = {{0, 0}, extent},
       .colorAttachmentCount= p->desc.nroutputs,
       .pColorAttachments   = attinfo,
       .layerCount          = 1};
 
-    vkCmdBeginRendering(frm->cmdbuf, &renderinfo);
+    vkCmdBeginRendering(ctx->offlinecmdbuf, &renderinfo);
 
-    // view port and scissor
-    VkViewport vp= {
-      0, 0, (f32)ctx->swpextent.width, (f32)ctx->swpextent.height, 0.f, 1.f};
-    vkCmdSetViewport(frm->cmdbuf, 0, 1, &vp);
-    VkRect2D scissor= {.extent= ctx->swpextent};
-    vkCmdSetScissor(frm->cmdbuf, 0, 1, &scissor);
+
+    VkViewport vp= {0, 0, (f32)extent.width, (f32)extent.height, 0.f, 1.f};
+    vkCmdSetViewport(ctx->offlinecmdbuf, 0, 1, &vp);
+    VkRect2D scissor= {.extent= extent};
+    vkCmdSetScissor(ctx->offlinecmdbuf, 0, 1, &scissor);
 
     for(usize i= 0; i < p->nrdraws; i++)
     {
       gfxdesc_drawcmd *dr= p->draws + i;
 
       vkCmdBindPipeline(
-        frm->cmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, dr->ppl->handle);
+        ctx->offlinecmdbuf, VK_PIPELINE_BIND_POINT_GRAPHICS, dr->ppl->handle);
 
       if(dr->push.mem.data && dr->push.mem.bytes)
       {
         vkCmdPushConstants(
-          frm->cmdbuf,
+          ctx->offlinecmdbuf,
           dr->ppl->layout,
           stage_to_vk(dr->push.stages),
           dr->push.mem.offset,
@@ -1480,16 +1377,20 @@ static int submit(vkctx *ctx, gfxpass *p)
       {
         VkDeviceSize off= 0;
         vkCmdBindVertexBuffers(
-          frm->cmdbuf, dr->bufs[b].binding, 1, &dr->bufs[b].buf->buf, &off);
+          ctx->offlinecmdbuf,
+          dr->bufs[b].binding,
+          1,
+          &dr->bufs[b].buf->buf,
+          &off);
       }
 
       u32 inst= dr->nrinst ? dr->nrinst : 1;
       if(dr->idx)
       {
         vkCmdBindIndexBuffer(
-          frm->cmdbuf, dr->idx->buf, 0, VK_INDEX_TYPE_UINT32);
+          ctx->offlinecmdbuf, dr->idx->buf, 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(
-          frm->cmdbuf,
+          ctx->offlinecmdbuf,
           dr->nridx,
           inst,
           dr->firstidx,
@@ -1497,35 +1398,144 @@ static int submit(vkctx *ctx, gfxpass *p)
           dr->firstinst);
       }
       else
-        vkCmdDraw(frm->cmdbuf, dr->nrvtx, inst, dr->firstvtx, dr->firstinst);
+        vkCmdDraw(
+          ctx->offlinecmdbuf, dr->nrvtx, inst, dr->firstvtx, dr->firstinst);
     }
-    vkCmdEndRendering(frm->cmdbuf);
-    // present barrier
+    vkCmdEndRendering(ctx->offlinecmdbuf);
+    OK(vkEndCommandBuffer(ctx->offlinecmdbuf), goto err;)
+  }
+
+  VkCommandBufferSubmitInfo cmdinfo= {
+    .sType        = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+    .commandBuffer= ctx->offlinecmdbuf};
+  VkSubmitInfo2 subinfo= {
+    .sType                 = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+    .commandBufferInfoCount= 1,
+    .pCommandBufferInfos   = &cmdinfo};
+  OK(vkQueueSubmit2(ctx->gfxq, 1, &subinfo, ctx->offlinefence), goto err;)
+
+  return 0;
+err:
+  return -1;
+}
+static int present(vkctx *ctx, gfximg *src)
+{
+  NNUL(ctx, goto err;)
+  NNUL(src, goto err;)
+
+  frmctx *frm= &ctx->frames[ctx->frmidx];
+  NNUL(frm, goto err;)
+
+  OK(vkWaitForFences(ctx->dev, 1, &frm->fence, VK_TRUE, UINT64_MAX), goto err;)
+
+  u32 imgidx;
+  OK(vkAcquireNextImageKHR(
+       ctx->dev, ctx->swp, UINT64_MAX, frm->imggotten, VKNULL, &imgidx),
+     goto err;)
+
+  // cmd buffer
+  {
+    vkResetCommandBuffer(frm->cmdbuf, 0);
+    VkCommandBufferBeginInfo binfo= {
+      .sType= VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+      .flags= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
+    OK(vkBeginCommandBuffer(frm->cmdbuf, &binfo), goto err;)
+
+    VkImageMemoryBarrier2 barriers[2]= {0};
+    barriers[0]                      = (VkImageMemoryBarrier2){
+      .sType           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+      .oldLayout       = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      .newLayout       = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      .srcStageMask    = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+      .dstStageMask    = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+      .srcAccessMask   = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+      .dstAccessMask   = VK_ACCESS_2_TRANSFER_READ_BIT,
+      .image           = src->img,
+      .subresourceRange= (VkImageSubresourceRange){
+        .aspectMask    = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseArrayLayer= 0,
+        .layerCount    = 1,
+        .baseMipLevel  = 0,
+        .levelCount    = 1}};
+    barriers[1]= (VkImageMemoryBarrier2){
+      .sType           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+      .oldLayout       = VK_IMAGE_LAYOUT_UNDEFINED,
+      .newLayout       = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      .srcStageMask    = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+      .dstStageMask    = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+      .srcAccessMask   = VK_ACCESS_2_NONE,
+      .dstAccessMask   = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+      .image           = ctx->swpimgs[imgidx],
+      .subresourceRange= (VkImageSubresourceRange){
+        .aspectMask    = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseArrayLayer= 0,
+        .layerCount    = 1,
+        .baseMipLevel  = 0,
+        .levelCount    = 1}};
+    VkDependencyInfo dinfo= {
+      .sType                  = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+      .imageMemoryBarrierCount= 2,
+      .pImageMemoryBarriers   = barriers};
+    vkCmdPipelineBarrier2(frm->cmdbuf, &dinfo);
+
+    VkImageBlit blitregion= {
+      .srcSubresource=
+        (VkImageSubresourceLayers){
+          .aspectMask    = VK_IMAGE_ASPECT_COLOR_BIT,
+          .mipLevel      = 0,
+          .baseArrayLayer= 0,
+          .layerCount    = 1},
+      .srcOffsets= {{0, 0, 0}, {(i32)src->desc.w, (i32)src->desc.h, 1}},
+      .dstSubresource=
+        (VkImageSubresourceLayers){
+          .aspectMask    = VK_IMAGE_ASPECT_COLOR_BIT,
+          .mipLevel      = 0,
+          .baseArrayLayer= 0,
+          .layerCount    = 1},
+      .dstOffsets= {
+        {0, 0, 0}, {(i32)ctx->swpextent.width, (i32)ctx->swpextent.height, 1}}};
+    vkCmdBlitImage(
+      frm->cmdbuf,
+      src->img,
+      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      ctx->swpimgs[imgidx],
+      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      1,
+      &blitregion,
+      VK_FILTER_NEAREST);
+
     VkImageMemoryBarrier2 prsbarrier= {
       .sType           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-      .srcStageMask    = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-      .dstStageMask    = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-      .srcAccessMask   = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-      .dstAccessMask   = VK_ACCESS_2_NONE,
-      .oldLayout       = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      .oldLayout       = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
       .newLayout       = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+      .srcStageMask    = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+      .dstStageMask    = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+      .srcAccessMask   = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+      .dstAccessMask   = VK_ACCESS_2_NONE,
       .image           = ctx->swpimgs[imgidx],
-      .subresourceRange= {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
-    VkDependencyInfo prsd= {
+      .subresourceRange= (VkImageSubresourceRange){
+        .aspectMask    = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseArrayLayer= 0,
+        .layerCount    = 1,
+        .baseMipLevel  = 0,
+        .levelCount    = 1}};
+    dinfo= (VkDependencyInfo){
       .sType                  = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
       .imageMemoryBarrierCount= 1,
       .pImageMemoryBarriers   = &prsbarrier};
-    vkCmdPipelineBarrier2(frm->cmdbuf, &prsd);
+    vkCmdPipelineBarrier2(frm->cmdbuf, &dinfo);
+
     OK(vkEndCommandBuffer(frm->cmdbuf), goto err;)
   }
+
   VkSemaphoreSubmitInfo waitinfo= {
     .sType    = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-    .stageMask= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+    .stageMask= VK_PIPELINE_STAGE_2_TRANSFER_BIT,
     .semaphore= frm->imggotten};
   VkSemaphore           subsem = ctx->frames[imgidx].renderfin;
   VkSemaphoreSubmitInfo siginfo= {
     .sType    = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-    .stageMask= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+    .stageMask= VK_PIPELINE_STAGE_2_TRANSFER_BIT,
     .semaphore= subsem};
   VkCommandBufferSubmitInfo cmdinfo= {
     .sType        = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
@@ -1541,7 +1551,6 @@ static int submit(vkctx *ctx, gfxpass *p)
   OK(vkResetFences(ctx->dev, 1, &frm->fence), goto err;)
   OK(vkQueueSubmit2(ctx->gfxq, 1, &subinfo, frm->fence), goto err;)
 
-  // present
   {
     VkPresentInfoKHR info= {
       .sType             = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -1558,6 +1567,9 @@ static int submit(vkctx *ctx, gfxpass *p)
 err:
   return -1;
 }
+
+int gfxpresent(gfxctx *c, gfximg *i) { return present(c, i); }
+
 int gfxinit_pass(gfxctx *c, gfxpass **o, gfxdesc_pass d)
 {
   return init_pass(c, o, d);

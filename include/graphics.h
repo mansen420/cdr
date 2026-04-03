@@ -7,7 +7,9 @@
 typedef struct gfxctx gfxctx;
 
 // -- memory -------------------------------------------------------------------
-typedef struct gfxmem gfxmem;
+typedef struct gfxmem      gfxmem;
+typedef struct gfxmem_dev  gfxmem_dev;
+typedef struct gfxmem_host gfxmem_host;
 
 typedef struct
 {
@@ -16,9 +18,10 @@ typedef struct
   const void *data;
 } gfxdesc_mem;
 
-int  gfxinit_mem(gfxctx *, gfxmem **, usize bytes);
-int  gfxinit_mapped(gfxctx *, gfxmem **, usize bytes, void **ptr);
-void gfxterm_mem(gfxctx *, gfxmem *);
+int   gfxinit_devmem(gfxctx *, gfxmem_dev **, usize bytes);
+int   gfxinit_hostmem(gfxctx *, gfxmem_host **, usize bytes);
+void  gfxterm_mem(gfxctx *, gfxmem *);
+void *gfxmmap(gfxctx *, gfxmem_host *);
 
 // -- buffer -------------------------------------------------------------------
 #define GFX_MAX_ATTRS 16
@@ -39,7 +42,7 @@ typedef struct
   u32         location;
   u32         offset;
   gfxfmt_attr fmt;
-} gfxattr;
+} gfxdesc_attr;
 
 enum
 {
@@ -52,7 +55,7 @@ typedef struct
   u32     binding;
   u32     stride;
   u32     rate;  // GFX_RATE_VERTEX or GFX_RATE_INSTANCE
-  gfxattr attrs[GFX_MAX_ATTRS];
+  gfxdesc_attr attrs[GFX_MAX_ATTRS];
   u32     nrattrs;
 } gfxdesc_bufbind;
 
@@ -87,7 +90,7 @@ typedef struct
 
 typedef struct gfximg gfximg;
 
-int  gfxinit_img(gfxctx *, gfximg **, gfxmem *, gfxdesc_img);
+int  gfxinit_img(gfxctx *, gfximg **, gfxmem_dev *, gfxdesc_img);
 void gfxterm_img(gfxctx *, gfximg *);
 
 gfximg *gfxget_display(gfxctx *);
@@ -198,6 +201,7 @@ typedef struct
 
 int  gfxinit(gfxctx **, dpyctx *, gfxdesc);
 void gfxterm(gfxctx *);
+int  gfxpresent(gfxctx *, gfximg *);
 int  gfxqry_init(gfxctx *);
 void gfxpause(gfxctx *);
 void gfxresume(gfxctx *);

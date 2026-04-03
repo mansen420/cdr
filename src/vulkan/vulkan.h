@@ -56,6 +56,17 @@ typedef struct gfxmem
   u32 slop;
 } vkarena;
 
+struct gfxmem_dev
+{
+  gfxmem base;
+};
+
+struct gfxmem_host
+{
+  gfxmem base;
+  void  *mapped;
+};
+
 typedef struct gfxctx
 {
   // handles
@@ -85,7 +96,7 @@ typedef struct gfxctx
   u32    nrframes;
 
   // memory
-  vkarena dfltpool;
+  gfxmem_dev dfltpool;
 
   // offline submit
   VkCommandBuffer offlinecmdbuf;
@@ -163,6 +174,7 @@ static int  init(vkctx **, void *dpy, gfxdesc desc);
 static void term(vkctx *ctx);
 static void term_frame(vkctx *ctx, u32 idx);
 static int  init_frame(vkctx *ctx);
+static int  init_swp(vkctx *ctx, i32 w, i32 h);
 static int  reinit_swp(vkctx *ctx, i32 w_new, i32 h_new);
 
 // internal — pass / commands

@@ -1,6 +1,6 @@
 #include "include/display.h"
 #include "include/graphics.h"
-#include "include/repl.h"
+#include "src/debug.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -28,13 +28,13 @@ int main(int argc, char **argv)
   u32     *spv = NULL;
   gfxctx  *gfx = NULL;
   dpyctx  *dpy = NULL;
-  replctx *repl= NULL;
   gfxbuf  *vtx = NULL;
   gfxppl  *ppl = NULL;
   gfxpass *pass= NULL;
+  gfximg  *fb  = NULL;
 
-  if(dpyinit(&dpy, "CDR", 800, 600, 0) < 0) goto exit;
-  if(gfxinit(&gfx, dpy, (gfxdesc){0}) < 0) goto exit;
+  OK(dpyinit(&dpy, "CDR", 800, 600, 0), goto exit;)
+  OK(gfxinit(&gfx, dpy, (gfxdesc){0}), goto exit;)
 
   vertex triangle[3]= {
     {.pos= {.x= 0.0f, .y= -0.5f}, .color= {.r= 1.f, .g= 0.f, .b= 0.f}},
@@ -46,12 +46,12 @@ int main(int argc, char **argv)
     .stride = sizeof *triangle,
     .rate   = GFX_RATE_VERTEX,
     .attrs=
-      {(gfxattr){.location= 0, .fmt= GFXFMT_2F32, .offset= 0},
-       (gfxattr){.location= 1, .fmt= GFXFMT_3F32, .offset= 8}},
+      {(gfxdesc_attr){.location= 0, .fmt= GFXFMT_2F32, .offset= 0},
+       (gfxdesc_attr){.location= 1, .fmt= GFXFMT_3F32, .offset= 8}},
     .nrattrs= 2};
   gfxdesc_buf bufdesc= {.nrelems= 3, .stride= sizeof *triangle};
   gfxdesc_mem vtxdata= {.data= triangle, .bytes= sizeof triangle, .offset= 0};
-  if(gfxinit_buf(gfx, &vtx, NULL, bufdesc, vtxdata) < 0) goto exit;
+  OK(gfxinit_buf(gfx, &vtx, NULL, bufdesc, vtxdata), goto exit;)
 
   // prepare shader
   {
@@ -59,7 +59,7 @@ int main(int argc, char **argv)
     const char *path   = argc > 1 ? argv[1] : "./assets/shader.spv";
 
     int fd= open(path, O_RDONLY);
-    if(fd == -1) goto exit;
+    OK(fd, goto exit;)
 
     struct stat st;
     fstat(fd, &st);
@@ -70,40 +70,37 @@ int main(int argc, char **argv)
 
     close(fd);
 
-    if(
-      gfxinit_ppl(
-        gfx,
-        &ppl,
-        (gfxdesc_ppl){
-          .program=
-            {{.spv      = spv,
-              .nrbytes  = nrbytes,
-              .stagebits= GFXSTAGE_VERT,
-              .entry    = "vertMain"},
-             {.spv      = spv,
-              .nrbytes  = nrbytes,
-              .stagebits= GFXSTAGE_FRAG,
-              .entry    = "fragMain"}},
-          .nrshaders = 2,
-          .bindings  = {vtxbind},
-          .nrbindings= 1}) < 0)
-      goto exit;
+    OK(gfxinit_ppl(
+         gfx,
+         &ppl,
+         (gfxdesc_ppl){
+           .program=
+             {{.spv      = spv,
+               .nrbytes  = nrbytes,
+               .stagebits= GFXSTAGE_VERT,
+               .entry    = "vertMain"},
+              {.spv      = spv,
+               .nrbytes  = nrbytes,
+               .stagebits= GFXSTAGE_FRAG,
+               .entry    = "fragMain"}},
+           .nrshaders = 2,
+           .bindings  = {vtxbind},
+           .nrbindings= 1}),
+       goto exit;)
 
     free(spv);
     spv= NULL;
   }
-  if(
-    gfxinit_pass(
-      gfx,
-      &pass,
-      (gfxdesc_pass){.outputs= {gfxget_display(gfx)}, .nroutputs= 1}) < 0)
-    goto exit;
+  OK(
+    gfxinit_img(
+      gfx, &fb, NULL, (gfxdesc_img){.w= 800, .h= 600, .fmt= GFXFMT_BGRA8_SRGB}),
+    goto exit;)
+  OK(gfxinit_pass(gfx, &pass, (gfxdesc_pass){.outputs= {fb}, .nroutputs= 1}),
+     goto exit;)
 
   dpyset_onrsz(dpy, on_resize);
   dpyset_onclose(dpy, on_close);
   dpyset_usrdata(dpy, gfx);
-
-  if(replinit(&repl, gfx) < 0) goto exit;
 
   while(!quit)
   {
@@ -114,17 +111,17 @@ int main(int argc, char **argv)
       (gfxdesc_drawcmd){
         .ppl= ppl, .bufs= {{.binding= 0, .buf= vtx}}, .nrbufs= 1, .nrvtx= 3});
     gfxcmd_end(pass);
-    if(gfxsubmit(gfx, pass) < 0) goto exit;
+    OK(gfxsubmit(gfx, pass), goto exit;)
+    OK(gfxpresent(gfx, fb), goto exit;)
   }
-  // reploop(repl);
 
   rc= 0;
 exit:
   gfxsync(gfx);
-  replterm(repl);
   gfxterm_pass(gfx, pass);
   gfxterm_ppl(gfx, ppl);
   gfxterm_buf(gfx, vtx);
+  gfxterm_img(gfx, fb);
   gfxterm(gfx);
   dpyterm(dpy);
   free(spv);
