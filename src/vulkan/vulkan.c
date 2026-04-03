@@ -357,8 +357,7 @@ static int init(vkctx **out, void *dpy, gfxdesc desc)
   if(!desc.flags & GFX_NO_IMPLICIT_MEM)
   {
     // TODO rather than default to 2MB, do lazy allozation and scale off the
-    // first
-    //  request
+    // first request
     if(!desc.devmem) desc.devmem= (usize)(2 * MB);
 
     VkMemoryPropertyFlags rbar_flags= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
@@ -1025,7 +1024,6 @@ static i64 arena_suballoc(vkarena *arena, usize bytes, usize align)
   arena->slop+= alignoverhead;
 
   usize free= arena->size - aligned;
-  printf("SIZE: %lu; REQ: %lu", arena->size, bytes);
   IF(bytes > free, goto err;)
 
   i64 res= (i64)aligned;
