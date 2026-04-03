@@ -2,20 +2,7 @@
 #include <stdlib.h>
 
 #include "src/wayland/wayland.h"
-
-#define NNUL(_expr, DO)                                               \
-  if(!(_expr))                                                        \
-  {                                                                   \
-    printf("Null pointer: %s (%s:%d)\n", #_expr, __FILE__, __LINE__); \
-    DO                                                                \
-  }
-
-#define OK(_expr, DO)                                             \
-  if((_expr) < 0)                                                 \
-  {                                                               \
-    printf("Negative: %s (%s:%d)\n", #_expr, __FILE__, __LINE__); \
-    DO                                                            \
-  }
+#include "src/debug.h"
 
 static void toplvlcnf_h(
   void                *data,

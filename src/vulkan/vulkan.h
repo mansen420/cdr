@@ -10,25 +10,7 @@
 
 #include "include/defs.h"
 #include "include/graphics.h"
-
-#define OK(_expr, DO)                                        \
-  if((_expr) < 0)                                            \
-  {                                                          \
-    printf("NEG: %s (%s:%d)\n", #_expr, __FILE__, __LINE__); \
-    DO                                                       \
-  }
-#define NNUL(_expr, DO)                                       \
-  if(!(_expr))                                                \
-  {                                                           \
-    printf("NULL: %s (%s:%d)\n", #_expr, __FILE__, __LINE__); \
-    DO                                                        \
-  }
-#define IF(_expr, DO)                                        \
-  if(_expr)                                                  \
-  {                                                          \
-    printf("BAD: %s (%s:%d)\n", #_expr, __FILE__, __LINE__); \
-    DO                                                       \
-  }
+#include "src/debug.h"
 
 #define ARENAS_MAX 32
 #define MB (1024 * 1024)
