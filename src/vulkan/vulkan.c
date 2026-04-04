@@ -613,7 +613,7 @@ static void term_buf(gfxctx *ctx, gfxbuf *buf)
   free(buf);
 }
 
-static int upload(vkctx *ctx, gfxbuf *buf, vkarena *arena, gfxdesc_mem mem)
+static int upload(vkctx *ctx, gfxbuf *buf, vkarena *arena, gfxdesc_upload mem)
 {
   int rc= -1;
 
@@ -653,14 +653,14 @@ exit:
   return rc;
 }
 
-int gfxupload(gfxctx *c, gfxbuf *b, gfxmem *m, gfxdesc_mem d)
+int gfxupload(gfxctx *c, gfxbuf *b, gfxmem *m, gfxdesc_upload d)
 {
   if(!m) m= &c->dfltpool.base;
   return upload(c, b, m, d);
 }
 
 static int init_buf(
-  gfxctx *ctx, gfxbuf **out, gfxmem *mem, gfxdesc_buf desc, gfxdesc_mem up)
+  gfxctx *ctx, gfxbuf **out, gfxmem *mem, gfxdesc_buf desc, gfxdesc_upload up)
 {
   gfxbuf *buf= NULL;
   NNUL(ctx, goto err;)
@@ -700,7 +700,7 @@ err:
   return -1;
 }
 
-int gfxinit_buf(gfxctx *c, gfxbuf **o, gfxmem *m, gfxdesc_buf d, gfxdesc_mem up)
+int gfxinit_buf(gfxctx *c, gfxbuf **o, gfxmem *m, gfxdesc_buf d, gfxdesc_upload up)
 {
   return init_buf(c, o, m, d, up);
 }

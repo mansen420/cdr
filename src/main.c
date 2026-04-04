@@ -1,6 +1,7 @@
 #include "include/display.h"
 #include "include/graphics.h"
 #include "src/debug.h"
+#include "src/io.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -50,25 +51,18 @@ int main(int argc, char **argv)
        (gfxdesc_attr){.location= 1, .fmt= GFXFMT_3F32, .offset= 8}},
     .nrattrs= 2};
   gfxdesc_buf bufdesc= {.nrelems= 3, .stride= sizeof *triangle};
-  gfxdesc_mem vtxdata= {.data= triangle, .bytes= sizeof triangle, .offset= 0};
+  gfxdesc_upload vtxdata= {.data= triangle, .bytes= sizeof triangle, .offset= 0};
   OK(gfxinit_buf(gfx, &vtx, NULL, bufdesc, vtxdata), goto exit;)
 
   // prepare shader
   {
-    usize       nrbytes= 0;
     const char *path   = argc > 1 ? argv[1] : "./assets/shader.spv";
+		
+		usize nrbytes= fsize(path);
 
-    int fd= open(path, O_RDONLY);
-    OK(fd, goto exit;)
-
-    struct stat st;
-    fstat(fd, &st);
-    nrbytes= st.st_size;
-
-    spv= malloc(nrbytes);
-    read(fd, spv, nrbytes);
-
-    close(fd);
+		spv= malloc(nrbytes);
+		NNUL(spv, goto exit;)
+		OK(fread_b(path, (u8 *)spv, nrbytes), goto exit;)
 
     OK(gfxinit_ppl(
          gfx,

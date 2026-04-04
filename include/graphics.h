@@ -16,7 +16,7 @@ typedef struct
   usize       bytes;
   usize       offset;
   const void *data;
-} gfxdesc_mem;
+} gfxdesc_upload;
 
 int   gfxinit_devmem(gfxctx *, gfxmem_dev **, usize bytes);
 int   gfxinit_hostmem(gfxctx *, gfxmem_host **, usize bytes);
@@ -67,8 +67,8 @@ typedef struct
 
 typedef struct gfxbuf gfxbuf;
 
-int  gfxinit_buf(gfxctx *, gfxbuf **, gfxmem *, gfxdesc_buf, gfxdesc_mem);
-int  gfxupload(gfxctx *, gfxbuf *, gfxmem *, gfxdesc_mem);
+int  gfxinit_buf(gfxctx *, gfxbuf **, gfxmem *, gfxdesc_buf, gfxdesc_upload);
+int  gfxupload(gfxctx *, gfxbuf *, gfxmem *, gfxdesc_upload);
 void gfxterm_buf(gfxctx *, gfxbuf *);
 
 // -- image --------------------------------------------------------------------
@@ -171,7 +171,7 @@ typedef struct
   u32     firstidx;
   struct
   {
-    gfxdesc_mem mem;
+    gfxdesc_upload mem;
     u32         stages;
   } push;
 } gfxdesc_drawcmd;

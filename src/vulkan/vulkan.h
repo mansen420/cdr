@@ -182,7 +182,7 @@ static void  arenaclear(vkarena *arena);
 static void  arenaterm(vkctx *ctx, vkarena *arena);
 static i64   arena_suballoc(vkarena *arena, usize bytes, usize align);
 static i64   bufferalloc(vkctx *ctx, vkarena *arena, VkBuffer buf);
-static int   upload(vkctx *ctx, gfxbuf *buf, vkarena *arena, gfxdesc_mem mem);
+static int   upload(vkctx *ctx, gfxbuf *buf, vkarena *arena, gfxdesc_upload mem);
 static usize alignup(usize addr, usize align);
 static int   updata_direct(
   vkctx      *ctx,
