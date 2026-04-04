@@ -1,2 +1,2 @@
 #define STB_TRUETYPE_IMPLEMENTATION
-#include "vendor/stb_truetype.h"
+#include "stb_truetype.h"

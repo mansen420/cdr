@@ -19,3 +19,4 @@
 !*.frag
 !*.md
 !*.sh
+.cache/
