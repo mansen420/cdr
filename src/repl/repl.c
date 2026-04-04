@@ -1,7 +1,7 @@
 #include "include/display.h"
 #include "include/graphics.h"
 #include "include/repl.h"
-#include "vendor/s7.h"
+#include "src/repl/vendor/s7.h"
 
 #include <stdlib.h>
 

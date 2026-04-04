@@ -1,6 +1,6 @@
-#include "io.h"
+#include "src/core/include/io.h"
 #include "include/mem.h"
-#include "src/debug.h"
+#include "src/core/include/debug.h"
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,7 +1,7 @@
 #include "include/display.h"
 #include "include/graphics.h"
-#include "src/debug.h"
-#include "src/io.h"
+#include "src/core/include/debug.h"
+#include "src/core/include/io.h"
 
 #include <fcntl.h>
 #include <stdio.h>

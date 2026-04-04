@@ -2,7 +2,7 @@
 #include <stdlib.h>
 
 #include "src/wayland/wayland.h"
-#include "src/debug.h"
+#include "src/core/include/debug.h"
 
 static void toplvlcnf_h(
   void                *data,

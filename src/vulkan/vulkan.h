@@ -10,7 +10,7 @@
 
 #include "include/defs.h"
 #include "include/graphics.h"
-#include "src/debug.h"
+#include "src/core/include/debug.h"
 
 #define ARENAS_MAX 32
 #define MB (1024 * 1024)

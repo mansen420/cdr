@@ -1,9 +1,9 @@
 #include "include/graphics.h"
 #include "include/graphics2D.h"
 #include "include/mem.h"
-#include "src/debug.h"
-#include "src/g2d.frag.spv.h"
-#include "src/g2d.vert.spv.h"
+#include "src/core/include/debug.h"
+#include "src/g2d/g2d.frag.spv.h"
+#include "src/g2d/g2d.vert.spv.h"
 
 #include <stdalign.h>
 #include <stddef.h>
@@ -13,10 +13,10 @@ struct g2dctx
 {
   gfxctx       *gpu;
   gfxppl       *ppl;  // later on we might need many pipelines
-  gfxmem       *mem;
+  gfxmem_dev   *mem;
   usize         memcap;
   gfxbuf       *buf;
-  u32           bufcap;   // max rects the current buffer can hold
+  u32           bufcap;  // max rects the current buffer can hold
   g2ddesc_rect *rects;
   u32           nrrects;
 };
@@ -27,7 +27,7 @@ static void term(g2dctx *ctx)
 {
   if(!ctx) return;
   if(ctx->ppl) gfxterm_ppl(ctx->gpu, ctx->ppl);
-  if(ctx->mem) gfxterm_mem(ctx->gpu, ctx->mem);
+  if(ctx->mem) gfxterm_mem(ctx->gpu, (gfxmem *)ctx->mem);
   cdrfree(NULL, ctx);
 }
 
@@ -92,7 +92,7 @@ static int init(g2dctx **out, gfxctx *gpu, g2ddesc desc)
 
   if(!(desc.flags & G2D_NO_IMPLICIT_MEM) && desc.memhint)
   {
-    OK(gfxinit_mem(ctx->gpu, &ctx->mem, desc.memhint), goto exit;)
+    OK(gfxinit_devmem(ctx->gpu, &ctx->mem, desc.memhint), goto exit;)
     NNUL(ctx->mem, goto exit;)
     ctx->memcap= desc.memhint;
   }
@@ -115,12 +115,12 @@ static int upload(g2dctx *ctx, gfxdesc_upload d, gfxmem *mem)
   IF(d.bytes % sizeof(desc_rect) != 0, goto exit;)
 
   // ensure backing memory exists and is large enough
-  //TODO maybe extract the realloc logic
+  // TODO maybe extract the realloc logic
   if(!mem)
   {
     if(!ctx->mem)
     {
-      OK(gfxinit_mem(ctx->gpu, &ctx->mem, d.bytes), goto exit;)
+      OK(gfxinit_devmem(ctx->gpu, &ctx->mem, d.bytes), goto exit;)
       NNUL(ctx->mem, goto exit;)
       ctx->memcap= d.bytes;
     }
@@ -129,13 +129,13 @@ static int upload(g2dctx *ctx, gfxdesc_upload d, gfxmem *mem)
       gfxterm_buf(ctx->gpu, ctx->buf);
       ctx->buf   = NULL;
       ctx->bufcap= 0;
-      gfxterm_mem(ctx->gpu, ctx->mem);
+      gfxterm_mem(ctx->gpu, (gfxmem*)ctx->mem);
       ctx->mem= NULL;
-      OK(gfxinit_mem(ctx->gpu, &ctx->mem, 2 * d.bytes), goto exit;)
+      OK(gfxinit_devmem(ctx->gpu, &ctx->mem, 2 * d.bytes), goto exit;)
       NNUL(ctx->mem, goto exit;)
       ctx->memcap= 2 * d.bytes;
     }
-    mem= ctx->mem;
+    mem= (gfxmem *)ctx->mem;
   }
 
   // fast path: reuse existing buffer
@@ -146,11 +146,7 @@ static int upload(g2dctx *ctx, gfxdesc_upload d, gfxmem *mem)
   {
     gfxbuf *newbuf= NULL;
     OK(gfxinit_buf(
-         ctx->gpu,
-         &newbuf,
-         mem,
-         (gfxdesc_buf){count, sizeof(desc_rect)},
-         d),
+         ctx->gpu, &newbuf, mem, (gfxdesc_buf){count, sizeof(desc_rect)}, d),
        goto exit;)
     NNUL(newbuf, goto exit;)
 
