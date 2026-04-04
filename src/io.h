@@ -20,3 +20,4 @@ int fprsbppmhdr(FILE *f, unsigned *w, unsigned *h);
 
 isize fsize(const char *path);
 int fread_b(const char *path, u8 *buf, usize cap);
+int femitspv(const char *rpath, const char *wpath);

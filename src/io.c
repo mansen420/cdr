@@ -1,4 +1,5 @@
 #include "io.h"
+#include "include/mem.h"
 #include "src/debug.h"
 
 #include <stdio.h>
@@ -62,6 +63,93 @@ int freadbppm(FILE *f, struct raster_3u8 data)
     }
 
   return 0;
+}
+
+int femitspv(const char *rpath, const char *wpath)
+{
+  int   rc= -1, fd= -1;
+  u8   *buf = NULL;
+  u32  *out = NULL;
+  char *sbuf= NULL;
+
+  NNUL(rpath, goto exit;)
+  NNUL(wpath, goto exit;)
+
+  isize bytes= fsize(rpath);
+  OK(bytes, goto exit;)
+
+  buf= cdralloc(NULL, bytes);
+  NNUL(buf, goto exit;)
+
+  OK(fread_b(rpath, (u8 *)buf, bytes), goto exit;)
+
+  out= cdralloc(NULL, bytes);
+  NNUL(out, goto exit;)
+
+  IF(bytes % 4 != 0, goto exit;)
+
+  for(usize i= 0; i < bytes; i+= 4)
+    out[i / 4]=
+      (u32)(buf[i + 0] | buf[i + 1] << 8 | buf[i + 2] << 16 | buf[i + 3] << 24);
+
+  // derive variable name
+  char varname[256];
+  {
+    const char *p    = rpath;
+    u32         count= 0;
+    while(*p && count < 255)
+    {
+      char towrite= '\0';
+      if(*p == '.' || *p == '/')
+        towrite= '_';
+      else
+        towrite= *p;
+      varname[count]= towrite;
+      p++, count++;
+    }
+    varname[count]= '\0';
+  }
+  // write string buffer
+  {
+    u32 words= bytes / 4;  // nr of u32 values
+    // each word is at most "0x01234567, ", 12 chars 256
+    // extra chars for header/footer boilerplace
+    u32 needed= words * 12 + 256;
+    sbuf      = cdralloc(NULL, needed);
+    NNUL(sbuf, goto exit;)
+
+    usize cursor= 0;
+    cursor+= sprintf(
+      sbuf, "#include \"include/defs.h\"\nstatic const u32 %s[]=\n{", varname);
+    for(usize i= 0; i < words; i++)
+    {
+      IF(cursor >= needed, goto exit;)
+      cursor+= sprintf(sbuf + cursor, "0x%08x, ", out[i]);
+			if((i + 1) % 6 == 0)
+				sbuf[cursor++]= '\n'; // newline every 6 words
+    }
+    cursor+= sprintf(
+      sbuf + cursor,
+      "};\n\nstatic const usize len_%s= sizeof(%s);",
+      varname,
+      varname);
+    IF(cursor >= needed, goto exit;)
+  }
+
+  fd= open(wpath, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+  OK(fd, goto exit;)
+  usize towrite= strlen(sbuf);
+  isize written= write(fd, sbuf, towrite);
+  OK(written, goto exit;)
+  IF(written != towrite, goto exit;)
+
+  rc= 0;
+exit:
+  if(buf) cdrfree(NULL, buf);
+  if(out) cdrfree(NULL, out);
+  if(sbuf) cdrfree(NULL, sbuf);
+  if(fd >= 0) close(fd);
+  return rc;
 }
 
 isize fsize(const char *path)
