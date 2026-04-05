@@ -1,6 +1,6 @@
 # CDR
 
-A graphics engine written in C that renders to a [Wayland](https://wayland.freedesktop.org/) window using the [Vulkan](https://www.vulkan.org/) graphics API. It also includes a CPU-side image processing library and an embedded [Scheme](https://en.wikipedia.org/wiki/Scheme_(programming_language\)) scripting REPL.
+A graphics engine written in C that renders to a [Wayland](https://wayland.freedesktop.org/) window using the [Vulkan](https://www.vulkan.org/) graphics API. It also includes a CPU-side image processing library and an embedded [Scheme](https://en.wikipedia.org/wiki/Scheme_(programming_language)) scripting REPL.
 
 Right now, CDR renders a colored triangle to the screen using shaders written in [Slang](https://shader-slang.com/) and compiled to SPIR-V. The architecture is designed to grow into a fuller 2D/GUI engine over time.
 
