@@ -19,4 +19,8 @@
 !*.frag
 !*.md
 !*.sh
+!*.clang-format
+!*.clangd
+
+# ignore 
 .cache/

@@ -1,0 +1,33 @@
+CompileFlags:
+  Add:
+    - -xc
+    - -std=c11
+    - -I/home/hussein/Projects/cdr
+    - -Wall
+    - -Wextra
+    - -Wpedantic
+
+Diagnostics:
+  Suppress:
+    - unused-variable
+    - unused-parameter
+  ClangTidy:
+    Add:
+      - bugprone-*
+    Remove:
+      - readability-braces-around-statements
+
+InlayHints:
+  Enabled: false          # or control individually:
+  ParameterNames: true
+  DeducedTypes: false
+  Designators: true
+
+Hover:
+  ShowAKA: true           # shows underlying types in hover, e.g. "uint32_t (aka unsigned int)"
+
+Completion:
+  AllScopes: true         # suggest symbols from all scopes, not just current
+
+Index:
+  Background: Build       # index in background for faster navigation

@@ -1,0 +1,36 @@
+BasedOnStyle: Google
+
+## Tabs
+#IndentWidth: 2
+#TabWidth: 2
+#UseTab: ForIndentation   # tabs for indent, spaces for alignment (best practical option)
+#
+## Braces on new lines (Allman)
+BreakBeforeBraces: Allman
+#
+## Keep short things on one line
+#AllowShortFunctionsOnASingleLine: Inline     # or All
+#AllowShortIfStatementsOnASingleLine: Always  # if you prefer `if(x) y;`
+#AllowShortLoopsOnASingleLine: true
+#AllowShortBlocksOnASingleLine: Always        # `{ return x; }` if short
+#
+## Function parameters / arguments: don't "bin-pack" across one line
+BinPackParameters: false
+BinPackArguments: false
+#
+## Optional but usually helpful
+ColumnLimit: 80
+PointerAlignment: Right
+DerivePointerAlignment: false
+
+# parameter alignment
+AlignAfterOpenBracket: AlwaysBreak
+ContinuationIndentWidth: 2   # or whatever your indent width is
+
+SpaceBeforeAssignmentOperators: false
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: true
+SpaceBeforeParens: Never
+
+# Don't reorder includes across blank-line groups
+IncludeBlocks: Preserve
