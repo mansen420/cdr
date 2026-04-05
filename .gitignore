@@ -7,7 +7,7 @@
 !src/*/*/
 !include/
 !assets/
-!test/
+!tests/
 !vendor/
 
 # un-ignore file types
