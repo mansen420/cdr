@@ -15,8 +15,10 @@ for dep in "$@"; do
     . "$dep/build.sh" "$TMPLIB" || { rm -rf "$TMPLIB"; exit 1; }
 done
 
-gcc "$SRC" -I. -L"$TMPLIB" \
+gcc "$SRC" -I. $CFLAGS -L"$TMPLIB" \
+    -Wl,--start-group \
     $(for a in "$TMPLIB"/*.a; do basename "$a" .a | sed 's/^lib/-l/'; done) \
+    -Wl,--end-group \
     $LFLAGS -o "$OUT"
 
 rm -rf "$TMPLIB"

@@ -18,7 +18,7 @@ for src in $(find "$MODDIR" -name '*.c' -not -path '*/tests/*' -not -path '*/.ca
     if [ -f "$cached" ] && [ "$cached" -nt "$src" ]; then
         cp "$cached" "$obj"
     else
-        gcc -c "$src" -I. -o "$obj" || { rm -rf "$TMPDIR"; exit 1; }
+        gcc -c "$src" -I. $CFLAGS -o "$obj" || { rm -rf "$TMPDIR"; exit 1; }
         cp "$obj" "$cached"
     fi
 done

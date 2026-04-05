@@ -5,7 +5,7 @@
 static void *default_alloc(void *ctx, usize bytes)
 {
   (void)ctx;
-  return malloc(bytes);
+  return calloc(1, bytes);
 }
 
 static void default_free(void *ctx, void *addr)

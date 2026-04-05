@@ -847,21 +847,19 @@ int gfxinit_img(gfxctx *c, gfximg **o, gfxmem_dev *m, gfxdesc_img d)
 }
 void gfxterm_img(gfxctx *c, gfximg *i) { term_img(c, i); }
 
-static int init_mem(vkctx *ctx, gfxmem **out, usize bytes)
+static int init_devmem(vkctx *ctx, gfxmem_dev **out, usize bytes)
 {
-  gfxmem *mem= NULL;
-  if(!out || !ctx || !bytes) goto err;
+  gfxmem_dev *mem= NULL;
+  NNUL(out, goto err;)
+  NNUL(ctx, goto err;)
+  IF(!bytes, goto err;)
 
   mem= calloc(1, sizeof *mem);
-  if(!mem) goto err;
+  NNUL(mem, goto err;)
 
-  VkMemoryPropertyFlags rbar_flags= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-
-  if(arenainit(mem, ctx, bytes, rbar_flags) < 0)
-    OK(arenainit(mem, ctx, bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
-       goto err;)
+  OK(arenainit(
+       &mem->base, ctx, bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
+     goto err;)
 
   *out= mem;
   return 0;
@@ -870,34 +868,33 @@ err:
   return -1;
 }
 
-static int init_mapped(vkctx *ctx, gfxmem **out, usize bytes, void **ptr)
+static int init_hostmem(vkctx *ctx, gfxmem_host **out, usize bytes)
 {
-  gfxmem *mem= NULL;
-  if(!out || !ctx || !bytes || !ptr) goto err;
+  gfxmem_host *mem= NULL;
+  NNUL(out, goto err;)
+  NNUL(ctx, goto err;)
+  IF(!bytes, goto err;)
 
   mem= calloc(1, sizeof *mem);
-  if(!mem) goto err;
+  NNUL(mem, goto err;)
 
-  VkMemoryPropertyFlags rbar_flags= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  // try rBAR first (device-local + host-visible), fall back to plain RAM
+  VkMemoryPropertyFlags rbar= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  VkMemoryPropertyFlags ram = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-  if(arenainit(mem, ctx, bytes, rbar_flags) < 0)
-    OK(arenainit(
-         mem,
-         ctx,
-         bytes,
-         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
-       goto err;)
+  if(arenainit(&mem->base, ctx, bytes, rbar) < 0)
+    OK(arenainit(&mem->base, ctx, bytes, ram), goto err;)
 
-  VkResult res= vkMapMemory(ctx->dev, mem->data, 0, bytes, 0, ptr);
-  OK(res, goto err;)
+  OK(vkMapMemory(ctx->dev, mem->base.data, 0, bytes, 0, &mem->mapped),
+     goto err;)
 
   *out= mem;
   return 0;
 err:
-  if(mem) arenaterm(ctx, mem);
+  if(mem) arenaterm(ctx, &mem->base);
   free(mem);
   return -1;
 }
@@ -911,10 +908,19 @@ static void term_mem(vkctx *ctx, gfxmem *mem)
   free(mem);
 }
 
-int gfxinit_mem(gfxctx *c, gfxmem **o, usize b) { return init_mem(c, o, b); }
-int gfxinit_mapped(gfxctx *c, gfxmem **o, usize b, void **p)
+int gfxinit_devmem(gfxctx *c, gfxmem_dev **o, usize b)
 {
-  return init_mapped(c, o, b, p);
+  return init_devmem(c, o, b);
+}
+int gfxinit_hostmem(gfxctx *c, gfxmem_host **o, usize b)
+{
+  return init_hostmem(c, o, b);
+}
+void *gfxmmap(gfxctx *c, gfxmem_host *m)
+{
+  (void)c;
+  NNUL(m, return NULL;)
+  return m->mapped;
 }
 void gfxterm_mem(gfxctx *c, gfxmem *m) { term_mem(c, m); }
 

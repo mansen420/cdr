@@ -26,8 +26,10 @@ typedef g2ddesc_rect desc_rect;
 static void term(g2dctx *ctx)
 {
   if(!ctx) return;
+  if(ctx->buf) gfxterm_buf(ctx->gpu, ctx->buf);
   if(ctx->ppl) gfxterm_ppl(ctx->gpu, ctx->ppl);
   if(ctx->mem) gfxterm_mem(ctx->gpu, (gfxmem *)ctx->mem);
+  if(ctx->rects) cdrfree(NULL, ctx->rects);
   cdrfree(NULL, ctx);
 }
 
@@ -60,7 +62,7 @@ static int init(g2dctx **out, gfxctx *gpu, g2ddesc desc)
                 .entry    = "main"},
               (gfxdesc_shader){
                 .spv      = assets_g2d_vert_spv,
-                .nrbytes  = len_assets_g2d_frag_spv,
+                .nrbytes  = len_assets_g2d_vert_spv,
                 .stagebits= GFXSTAGE_VERT,
                 .entry    = "main"}},
            .nrranges  = 1,
@@ -129,7 +131,7 @@ static int upload(g2dctx *ctx, gfxdesc_upload d, gfxmem *mem)
       gfxterm_buf(ctx->gpu, ctx->buf);
       ctx->buf   = NULL;
       ctx->bufcap= 0;
-      gfxterm_mem(ctx->gpu, (gfxmem*)ctx->mem);
+      gfxterm_mem(ctx->gpu, (gfxmem *)ctx->mem);
       ctx->mem= NULL;
       OK(gfxinit_devmem(ctx->gpu, &ctx->mem, 2 * d.bytes), goto exit;)
       NNUL(ctx->mem, goto exit;)
@@ -167,4 +169,49 @@ exit:
   return rc;
 }
 
-static void rect(g2dctx *g2d, gfxpass *pass) {}
+static int draw(g2dctx *ctx, gfxpass *pass, t2f32 screen)
+{
+  int rc= -1;
+
+  NNUL(ctx, goto exit;)
+  NNUL(pass, goto exit;)
+  NNUL(ctx->buf, goto exit;)
+
+  gfxcmd_begin(pass);
+  gfxcmd_draw(
+    pass,
+    (gfxdesc_drawcmd){
+      .ppl   = ctx->ppl,
+      .bufs  = {{.binding= 0, .buf= ctx->buf}},
+      .nrbufs= 1,
+      .nrvtx = 6,
+      .nrinst= ctx->nrrects,
+      .push  = {
+        .mem   = {.data= &screen, .bytes= sizeof screen},
+        .stages= GFXSTAGE_VERT | GFXSTAGE_FRAG}});
+  gfxcmd_end(pass);
+
+  rc= 0;
+exit:
+  return rc;
+}
+
+int g2dinit(g2dctx **out, gfxctx *gpu, g2ddesc desc)
+{
+  return init(out, gpu, desc);
+}
+
+void g2dterm(g2dctx *c)
+{
+  term(c);
+}
+
+int g2dupload(g2dctx *c, gfxdesc_upload d, gfxmem *m)
+{
+  return upload(c, d, m);
+}
+
+int g2ddraw(g2dctx *c, gfxpass *p, t2f32 screen)
+{
+  return draw(c, p, screen);
+}
