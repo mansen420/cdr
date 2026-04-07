@@ -33,6 +33,7 @@ int fwritebppm(FILE *f, const t3u8 *px, unsigned w, unsigned h)
   return 0;
 }
 
+// TODO these functions kinda suck, use raw Unix
 int fprsbppmhdr(FILE *f, unsigned *w, unsigned *h)
 {
   if(w == NULL || h == NULL) return -1;  // null data

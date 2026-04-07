@@ -201,17 +201,11 @@ int g2dinit(g2dctx **out, gfxctx *gpu, g2ddesc desc)
   return init(out, gpu, desc);
 }
 
-void g2dterm(g2dctx *c)
-{
-  term(c);
-}
+void g2dterm(g2dctx *c) { term(c); }
 
 int g2dupload(g2dctx *c, gfxdesc_upload d, gfxmem *m)
 {
   return upload(c, d, m);
 }
 
-int g2ddraw(g2dctx *c, gfxpass *p, t2f32 screen)
-{
-  return draw(c, p, screen);
-}
+int g2ddraw(g2dctx *c, gfxpass *p, t2f32 screen) { return draw(c, p, screen); }

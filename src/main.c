@@ -2,6 +2,7 @@
 #include "include/graphics.h"
 #include "src/core/include/debug.h"
 #include "src/core/include/io.h"
+#include "include/graphics2D.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -33,6 +34,7 @@ int main(int argc, char **argv)
   gfxppl  *ppl = NULL;
   gfxpass *pass= NULL;
   gfximg  *fb  = NULL;
+	
 
   OK(dpyinit(&dpy, "CDR", 800, 600, 0), goto exit;)
   OK(gfxinit(&gfx, dpy, (gfxdesc){0}), goto exit;)

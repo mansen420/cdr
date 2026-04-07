@@ -4,82 +4,98 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-A Vulkan + Wayland graphics application written in C. Renders a triangle using dynamically-compiled Slang shaders. Also contains a CPU-side raster image processing library with PPM I/O.
+A Vulkan 1.4 + Wayland graphics application written in C. Renders geometry using dynamically-compiled Slang shaders. Includes a 2D rendering layer (g2d), a CPU-side raster image processing library with PPM I/O, a pluggable allocator, a GUI layer (stb_truetype), and an embedded Scheme REPL (s7).
 
 ## Build
 
-There is no Makefile. Compile manually from the project root:
+No Makefile. The build uses per-module shell scripts that produce static libraries.
 
 ```sh
-# Compile the main Vulkan+Wayland application
-gcc src/vulkan/vulkan.c src/wayland/wayland.c src/wayland/xdg-shell-client-protocol.c \
-    src/raster.c src/io.c \
-    -I. -lvulkan -lwayland-client -o cdr
-```
+# Build the main application (compiles all modules, links into ./cdr)
+./build.sh            # output defaults to ./cdr
+./build.sh mybin      # custom output name
 
-```sh
-# Compile a test (e.g. ppmread)
-gcc test/ppmread.c src/io.c src/raster.c -I. -o ppmread_test
-```
-
-```sh
-# Compile Slang shaders to SPIR-V (requires the bundled Slang compiler)
-./1.4.341.1/x86_64/bin/slangc assets/shader.slang -target spirv -o assets/shader.spv
-```
-
-Run the application (pass the compiled SPIR-V path as argv[1], defaults to `./assets/shader.spv`):
-```sh
+# Run
 ./cdr assets/shader.spv
 ```
 
-The Vulkan SDK is bundled at `1.4.341.1/x86_64/`. Headers and tools (slangc, glslc, etc.) are in `1.4.341.1/x86_64/include/` and `1.4.341.1/x86_64/bin/`.
+Each module under `src/` has a `build.sh` that calls `src/tools/buildlib.sh` to produce a `.a`. The top-level `build.sh` calls `src/tools/buildbin.sh`, which sources each module's build script, collects link flags, and links the final binary.
+
+```sh
+# Compile unit tests (unity build pattern)
+gcc -DTESTING src/wayland/wayland.c src/wayland/xdg-shell-client-protocol.c \
+    src/raster.c src/io.c src/vulkan/tests/test_vulkan.c \
+    -I. -lvulkan -lwayland-client -o vulkan_test
+
+gcc src/wayland/xdg-shell-client-protocol.c \
+    src/wayland/tests/test_wayland.c -I. -lwayland-client -o wayland_test
+```
+
+```sh
+# Compile Slang shaders to SPIR-V
+./1.4.341.1/x86_64/bin/slangc assets/shader.slang -target spirv -o assets/shader.spv
+```
+
+The Vulkan SDK is bundled at `1.4.341.1/x86_64/`.
 
 ## Architecture
 
+### Module Structure
+
+```
+include/          public API headers (defs.h, display.h, graphics.h, graphics2D.h, mem.h, repl.h)
+src/core/         allocator (mem.c), raster processing, PPM I/O, utils (memfill)
+  include/        internal headers: debug.h (OK/NNUL/IF macros), arn.h (arena), io.h, raster.h
+src/vulkan/       Vulkan context, pipeline, typed GPU memory, frame management
+src/wayland/      Wayland display layer, XDG shell glue
+src/g2d/          2D rendering (rects) over the gfx layer, with embedded SPIR-V headers
+src/gui/          GUI layer using stb_truetype
+src/repl/         Embedded Scheme REPL (s7)
+src/tools/        Build helpers: buildlib.sh, buildbin.sh, emitspv (SPIR-V to C header)
+src/main.c        Application entry point — wires display, graphics, pipeline, and render loop
+```
+
+### Key Abstractions
+
+**Display** (`dpyctx`/`wlctx` — same pointer): Wayland window. `dpyinit` -> `dpypoll` loop -> `dpyterm`. Callbacks for resize/close via `dpyset_onrsz`/`dpyset_onclose`.
+
+**Graphics** (`gfxctx`/`vkctx` — same pointer): Vulkan context with typed resources:
+- `gfxmem_dev` / `gfxmem_host` — typed GPU memory pools (implicit default pool, or user-allocated)
+- `gfxbuf` — vertex/index buffers bound to memory
+- `gfximg` — images (render targets, textures)
+- `gfxppl` — shader pipeline (SPIR-V + vertex bindings + push constants)
+- `gfxpass` — render pass with output images
+- Command recording: `gfxcmd_begin` -> `gfxcmd_draw` -> `gfxcmd_end` -> `gfxsubmit` -> `gfxpresent`
+
+**2D Layer** (`g2dctx`): Immediate-mode rect rendering over gfx. Owns its pipeline with embedded SPIR-V. `g2dinit` -> `g2dupload` -> `g2ddraw` per frame.
+
+**Allocator** (`mem.h`): `cdralloc`/`cdrfree` with pluggable backend via `cdrset_alloc`. Default is `calloc`/`free`.
+
 ### Type System (`include/defs.h`)
-All code uses the custom typedefs from `defs.h`: `u8/u16/u32/u64`, `i8/i16/i32/i64`, `f32/f64`, `usize/isize`. Vector types follow the pattern `t{N}{T}` (e.g. `t4u8` = 4-channel u8, `t3f32` = 3-channel f32) with named fields accessible as `.r/.g/.b/.a` or `.x/.y/.z/.w`.
 
-Raster buffers use typed structs: `struct raster_4u8`, `struct raster_3u8`, `struct raster_3f32`, `struct raster_4f32` — each holding a `buf`, `stride`, `pxw`, `pxh`, and `enum pxfmt`.
+Custom typedefs: `u8/u16/u32/u64`, `i8/i16/i32/i64`, `f32/f64`, `usize/isize`. Vector types: `t{N}{T}` (e.g. `t4u8`, `t3f32`) with `.r/.g/.b/.a` or `.x/.y/.z/.w` fields. Raster buffers: `struct raster_{N}{T}` with `buf`, `stride`, `pxw`, `pxh`, `pxfmt`.
 
-### Display Layer (`include/display.h` / `src/wayland/wayland.c`)
-The `dpyctx` is an opaque handle to the Wayland connection. API:
-- `dpyinit(title, w, h, flags)` — create window
-- `dpypoll(ctx)` — dispatch events; returns `-1` on close
-- `dpygetnwin(ctx)` / `dpygetncon(ctx)` — get native Wayland `wl_surface` / `wl_display` pointers (passed to Vulkan surface creation)
-- `dpyterm(ctx)` — destroy
+### Error Handling (`src/core/include/debug.h`)
 
-Wayland event handlers are defined directly in `wayland.c`. The handler functions use `NNUL`/`OK` macros defined at the top of that file.
+Three macros, always used instead of raw `if`:
+- `OK(expr, DO)` — runs `DO` if `expr < 0`
+- `NNUL(expr, DO)` — runs `DO` if `expr` is null
+- `IF(expr, DO)` — runs `DO` if `expr` is truthy
 
-### Graphics Layer (`include/graphics.h` / `src/vulkan/vulkan.c`)
-The `gfxctx` is an opaque handle to the Vulkan context. API:
-- `gfxinit(dpy)` — takes a `dpyctx *` and creates instance, surface, device, swapchain, command pools
-- `gfxterm(ctx)` — destroys all Vulkan objects in reverse order
+Pair with `goto err`/`goto exit` for cleanup. Declare all variables before the first goto target.
 
-Internally, the Vulkan state is `vkctx` (typedef'd as both `gfxctx` and `vkctx`). Key design choices:
-- Uses **dynamic rendering** (VK_KHR_dynamic_rendering / Vulkan 1.3) — no render pass objects
-- Uses **VK_KHR_synchronization2** for pipeline barriers (`vkCmdPipelineBarrier2`, `vkQueueSubmit2`)
-- Targets **Vulkan 1.4** API
-- Validation layer (`VK_LAYER_KHRONOS_validation`) is always enabled
-- Graphics and present queues may be the same (`gfxprs == 1`) or separate
-- Frame contexts (`frmctx`) hold one command buffer, two semaphores (image acquired + render finished), and a fence; one per swapchain image
+### Vulkan Design
+- Dynamic rendering (no VkRenderPass objects), synchronization2 for barriers
+- Validation layer always enabled
+- rBAR detection: tries DEVICE_LOCAL|HOST_VISIBLE, falls back to staging
+- `#ifndef TESTING` guards `main()` in vulkan.c for unit test builds
+- Shader entry points: `vertMain` / `fragMain`
 
-The pipeline is created by `mkgfxppl(ctx, spv_code, byte_len)` — takes SPIR-V bytecode, creates shader modules and a graphics pipeline. Vertex/fragment entry points must be named `vertMain` / `fragMain`.
+## Conventions
 
-### Raster Library (`src/raster.c`, `src/raster.h`)
-CPU image processing operations:
-- `upsample_4u8` / `upsample_3u8` — nearest-neighbor upscaling by integer factor
-- `dnsamplebx_4u8` / `dnsamplebx_3u8` — box-filter downscaling by integer factor
-- `rgba2planar` (inline) — interleaved RGBA → planar `[RR...GG...BB...AA...]`
-
-### I/O (`src/io.c`, `src/io.h`)
-Binary PPM read/write:
-- `fwritebppm` / `prnbppm` — write PPM
-- `fprsbppmhdr` + `freadbppm` — parse header then read pixels (must call in order)
-
-### Shaders (`assets/`)
-Shaders are written in **Slang** (`.slang` files). Both vertex and fragment stages can coexist in a single file using `[shader("vertex")]` / `[shader("fragment")]` attributes. Compiled to SPIR-V (`.spv`) using the bundled `slangc`.
-
-### Error Handling Pattern
-Two macros used throughout:
-- `OK(expr, DO)` — execute `DO` if `expr < 0` (used for Vulkan `VkResult`)
-- `NNUL(expr, DO)` — execute `DO` if `expr` is null
+- **Formatting**: `x= value` (no space before `=`), Allman braces, 80-col limit, ASCII only in source
+- **Naming**: `<module><verb>_<specifier>` grammar (e.g. `gfxinit_buf`, `dpyset_onrsz`). Queries use `qry` as a verb (`gfxqry_init`, `dpyqry_init`). Event handlers use `_h` suffix internally.
+- **Public/internal split**: module-prefixed functions (e.g. `gfxinit_buf`) are thin bridges to `static` internal functions (e.g. `init_buf`)
+- **All internal functions are `static`**; tests use unity build (`#include "module.c"`) to access them
+- **"All zeroed == dead" invariant**: `alive` flag, `memset` before `free` in term functions
+- **Test files**: marked `// AI-generated (Claude)` at the top
