@@ -1,8 +1,9 @@
 #include "include/display.h"
 #include "include/graphics.h"
+#include "include/graphics2D.h"
 #include "src/core/include/debug.h"
 #include "src/core/include/io.h"
-#include "include/graphics2D.h"
+#include "src/shader.spv.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -34,7 +35,6 @@ int main(int argc, char **argv)
   gfxppl  *ppl = NULL;
   gfxpass *pass= NULL;
   gfximg  *fb  = NULL;
-	
 
   OK(dpyinit(&dpy, "CDR", 800, 600, 0), goto exit;)
   OK(gfxinit(&gfx, dpy, (gfxdesc){0}), goto exit;)
@@ -52,31 +52,44 @@ int main(int argc, char **argv)
       {(gfxdesc_attr){.location= 0, .fmt= GFXFMT_2F32, .offset= 0},
        (gfxdesc_attr){.location= 1, .fmt= GFXFMT_3F32, .offset= 8}},
     .nrattrs= 2};
-  gfxdesc_buf bufdesc= {.nrelems= 3, .stride= sizeof *triangle};
-  gfxdesc_upload vtxdata= {.data= triangle, .bytes= sizeof triangle, .offset= 0};
+  gfxdesc_buf    bufdesc= {.nrelems= 3, .stride= sizeof *triangle};
+  gfxdesc_upload vtxdata= {
+    .data= triangle, .bytes= sizeof triangle, .offset= 0};
   OK(gfxinit_buf(gfx, &vtx, NULL, bufdesc, vtxdata), goto exit;)
 
   // prepare shader
   {
-    const char *path   = argc > 1 ? argv[1] : "./assets/shader.spv";
+    const char *path  = argc > 1 ? argv[1] : NULL;
+    usize       spvlen= 0;
+		const u32 *spvoremb= spv;
 		
-		usize nrbytes= fsize(path);
+    if(path)
+    {
+      spvlen= fsize(path);
+      OK(spvlen, goto exit;)
 
-		spv= malloc(nrbytes);
-		NNUL(spv, goto exit;)
-		OK(fread_b(path, (u8 *)spv, nrbytes), goto exit;)
+      spv= malloc(spvlen);
+      NNUL(spv, goto exit;)
+      OK(fread_b(path, (u8 *)spv, spvlen), goto exit;)
+			spvoremb= spv;
+    }
+		else
+		{
+			spvoremb= assets_shader_spv;
+			spvlen= len_assets_shader_spv;
+		}
 
     OK(gfxinit_ppl(
          gfx,
          &ppl,
          (gfxdesc_ppl){
            .program=
-             {{.spv      = spv,
-               .nrbytes  = nrbytes,
+             {{.spv      = spvoremb,
+               .nrbytes  = spvlen,
                .stagebits= GFXSTAGE_VERT,
                .entry    = "vertMain"},
-              {.spv      = spv,
-               .nrbytes  = nrbytes,
+              {.spv      = spvoremb,
+               .nrbytes  = spvlen,
                .stagebits= GFXSTAGE_FRAG,
                .entry    = "fragMain"}},
            .nrshaders = 2,
