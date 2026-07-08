@@ -47,7 +47,7 @@ raster_t upsample_4u8(
   const px_t *restrict src= in.buf;
 
   raster_t res= {
-    out, in.pxw * mag, in.pxw * mag, in.pxh * mag, FMT_RGBA};
+    out, in.pxw * mag, in.pxw * mag, in.pxh * mag};
   if(mag == 0) return res;
   if(mag == 1)
   {
@@ -168,7 +168,7 @@ raster_t upsample_3u8(
   const px_t *restrict src= in.buf;
 
   raster_t res= {
-    out, in.pxw * mag, in.pxw * mag, in.pxh * mag, FMT_RGB};
+    out, in.pxw * mag, in.pxw * mag, in.pxh * mag};
   if(mag == 0) return res;
   if(mag == 1)
   {

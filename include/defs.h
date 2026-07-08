@@ -46,11 +46,11 @@ typedef union t4f64
 {
   struct
   {
-    float r, g, b, a;
+    f64 r, g, b, a;
   };
   struct
   {
-    float x, y, z, w;
+    f64 x, y, z, w;
   };
 } t4f64;
 
@@ -58,11 +58,11 @@ typedef union t3f64
 {
   struct
   {
-    float r, g, b;
+    f64 r, g, b;
   };
   struct
   {
-    float x, y, z;
+    f64 x, y, z;
   };
 } t3f64;
 
@@ -70,7 +70,7 @@ typedef union t2f64
 {
   struct
   {
-    float x, y;
+    f64 x, y;
   };
 } t2f64;
 
@@ -322,41 +322,30 @@ typedef union t4i64
   };
 } t4i64;
 
-enum pxfmt
-{
-  FMT_RGB,
-  FMT_RGBA,
-  FMT_PRGB,
-  FMT_PRGBA,
-};
-struct raster_4u8
+typedef struct raster_4u8
 {
   t4u8      *buf;
   unsigned   stride;  // elements of buf per row
   unsigned   pxw, pxh;
-  enum pxfmt fmt;
-};
+} raster_4u8;
 
-struct raster_3u8
+typedef struct raster_3u8
 {
   t3u8      *buf;
   unsigned   stride;  // elements of buf per row
   unsigned   pxw, pxh;
-  enum pxfmt fmt;
-};
+} raster_3u8;
 
-struct raster_3f32
+typedef struct raster_3f32
 {
   t3f32     *buf;
   unsigned   stride;  // elements of buf per row
   unsigned   pxw, pxh;
-  enum pxfmt fmt;
-};
+} raster_3f32;
 
-struct raster_4f32
+typedef struct raster_4f32
 {
   t4f32     *buf;
   unsigned   stride;  // elements of buf per row
   unsigned   pxw, pxh;
-  enum pxfmt fmt;
-};
+} raster_4f32;

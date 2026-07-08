@@ -37,7 +37,6 @@ static int init(g2dctx **out, gfxctx *gpu, g2ddesc desc)
 {
   int     rc   = -1;
   g2dctx *ctx  = NULL;
-  u32    *spv_f= NULL, *spv_v= NULL;
 
   NNUL(out, goto exit;)
   NNUL(gpu, goto exit;)
@@ -103,8 +102,6 @@ static int init(g2dctx **out, gfxctx *gpu, g2ddesc desc)
   rc  = 0;
 exit:
   OK(rc, term(ctx);)
-  if(spv_f) cdrfree(NULL, spv_f);
-  if(spv_v) cdrfree(NULL, spv_v);
   return rc;
 }
 

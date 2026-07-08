@@ -43,20 +43,3 @@ static inline void rgba2planar(
     *(outb + i + n + n + n)= (rgba + i)->a;
   }
 }
-
-static inline unsigned n_chn(enum pxfmt fmt)
-{
-  switch(fmt)
-  {
-    case FMT_RGB:
-      return 3;
-    case FMT_RGBA:
-      return 4;
-    case FMT_PRGB:
-      return 3;
-    case FMT_PRGBA:
-      return 4;
-    default: 
-      return 0;
-  }
-}

@@ -9,6 +9,7 @@
 
 #include "include/display.h"
 #include "include/graphics.h"
+#include "include/mem.h"
 
 static const char *const VK_LAYER_VALID_NAME= "VK_LAYER_KHRONOS_validation";
 
@@ -131,7 +132,7 @@ err:
 
 static int init(vkctx **out, void *dpy, gfxdesc desc)
 {
-  vkctx *ctx= calloc(1, sizeof *ctx);
+  vkctx *ctx= cdralloc(NULL, sizeof *ctx);
 
   // instance
   {
@@ -433,7 +434,7 @@ static int init_ppl(vkctx *ctx, gfxppl **out, gfxdesc_ppl desc)
   NNUL(out, goto err;)
   NNUL(desc.nrshaders, goto err;)
 
-  ppl= calloc(1, sizeof *ppl);
+  ppl= cdralloc(NULL, sizeof *ppl);
   NNUL(ppl, goto err;)
 
   VkPipelineShaderStageCreateInfo shaders[GFX_MAX_SHADERS];
@@ -670,7 +671,7 @@ static int init_buf(
     mem= &ctx->dfltpool.base;
   }
 
-  buf= calloc(1, sizeof *buf);
+  buf= cdralloc(NULL, sizeof *buf);
   NNUL(buf, goto err;)
 
   usize bytes= (usize)desc.nrelems * desc.stride;
@@ -795,7 +796,7 @@ static int init_img(vkctx *ctx, gfximg **out, gfxmem_dev *mem, gfxdesc_img desc)
   if(!mem) mem= &ctx->dfltpool;
   NNUL(mem->base.data, goto err;)
 
-  img= calloc(1, sizeof *img);
+  img= cdralloc(NULL, sizeof *img);
   NNUL(img, goto err;)
 
   {
@@ -854,7 +855,7 @@ static int init_devmem(vkctx *ctx, gfxmem_dev **out, usize bytes)
   NNUL(ctx, goto err;)
   IF(!bytes, goto err;)
 
-  mem= calloc(1, sizeof *mem);
+  mem= cdralloc(NULL, sizeof *mem);
   NNUL(mem, goto err;)
 
   OK(arenainit(
@@ -875,7 +876,7 @@ static int init_hostmem(vkctx *ctx, gfxmem_host **out, usize bytes)
   NNUL(ctx, goto err;)
   IF(!bytes, goto err;)
 
-  mem= calloc(1, sizeof *mem);
+  mem= cdralloc(NULL, sizeof *mem);
   NNUL(mem, goto err;)
 
   // try rBAR first (device-local + host-visible), fall back to plain RAM
@@ -1253,7 +1254,7 @@ static int init_pass(vkctx *ctx, gfxpass **out, gfxdesc_pass desc)
 
   if(!out) goto err;
 
-  p= calloc(1, sizeof *p);
+  p= cdralloc(NULL, sizeof *p);
   if(!p) goto err;
 
   p->desc= desc;

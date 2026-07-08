@@ -49,7 +49,6 @@ int fprsbppmhdr(FILE *f, unsigned *w, unsigned *h)
 int freadbppm(FILE *f, struct raster_3u8 data)
 {
   if(data.buf == NULL || data.pxw * data.pxh == 0) return -1;  // invalid data
-  if(data.fmt != FMT_RGB) return -2;                           // bad fmt
 
   if(data.pxw == data.stride)
   {
