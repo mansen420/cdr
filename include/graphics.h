@@ -90,6 +90,7 @@ typedef struct
 
 typedef struct gfximg gfximg;
 
+// gfxmem_dev *: NULL = allocate from the context's implicit device pool
 int  gfxinit_img(gfxctx *, gfximg **, gfxmem_dev *, gfxdesc_img);
 void gfxterm_img(gfxctx *, gfximg *);
 
