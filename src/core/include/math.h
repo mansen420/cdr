@@ -3,7 +3,7 @@
 
 static inline f32 dot_3(t3f32 u, t3f32 v)
 {
-	return u.x * v.x + u.y * v.y + u.z * v.z;
+  return u.x * v.x + u.y * v.y + u.z * v.z;
 }
 
 static inline t3f32 cross(t3f32 u, t3f32 v)
@@ -23,8 +23,9 @@ static inline int zero_3(t3f32 u) { return zero_f32(dot_3(u, u)); }
 
 static inline f32 linmap_f32(f32 x, t2f32 fro, t2f32 to)
 {
-  if(zero_f32(fro.y - fro.x)) return to.x;
-  return (to.y - to.x) / (fro.y - fro.x) * (x - fro.x) + to.x;
+  f32 denom= fro.y - fro.x;
+  if(zero_f32(denom)) return to.x;
+  return (to.y - to.x) / (denom) * (x - fro.x) + to.x;
 }
 
 static inline t3f32 linmap_3(t3f32 x, t2f32 fro, t2f32 to)
@@ -89,9 +90,7 @@ static inline t3f32 divs_3(t3f32 u, f32 s)
 static inline t3f32 fma_3(t3f32 a, f32 s, t3f32 b)
 {
   return (t3f32){
-    .x= fmaf(a.x, s, b.x),
-    .y= fmaf(a.y, s, b.y),
-    .z= fmaf(a.z, s, b.z)};
+    .x= fmaf(a.x, s, b.x), .y= fmaf(a.y, s, b.y), .z= fmaf(a.z, s, b.z)};
 }
 
 static inline t3f32 perm_3(t3f32 u, t3u32 idx)

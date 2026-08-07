@@ -2,7 +2,7 @@ CompileFlags:
   Add:
     - -xc
     - -std=c11
-    - -I/home/hussein/Projects/cdr
+    - -I/home/hussein/Projects/cdr-clean
     - -Wall
     - -Wextra
     - -Wpedantic
