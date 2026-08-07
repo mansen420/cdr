@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -8,17 +9,7 @@
 
 int writeppm(const char *path, t3u8 *buf, unsigned w, unsigned h)
 {
-  int   rc= -1;
-  FILE *f = NULL;
-
-  f= fopen(path, "wb");
-  if(!f) goto exit;
-
-  rc= fwritebppm(f, buf, w, h);
-
-exit:
-  if(f) fclose(f);
-  return rc;
+  return fw_ppm(path, (struct raster_3u8){buf, w, w, h});
 }
 void drawimg(struct raster_3u8 img)
 {
@@ -37,7 +28,7 @@ int main(int argc, char *argv[])
     const unsigned w= 1280, h= 720;
 
     t3u8 *buf= malloc(w * h * sizeof *buf);
-    img      = (struct raster_3u8){buf, w, w, h, FMT_RGB};
+    img      = (struct raster_3u8){buf, w, w, h};
     drawimg(img);
     writeppm("original.ppm", buf, w, h);
   }
@@ -45,15 +36,13 @@ int main(int argc, char *argv[])
   struct raster_3u8 readimg;
   {
     unsigned w, h;
-    FILE    *f     = fopen("original.ppm", "rb");
-    int      status= fprsbppmhdr(f, &w, &h);
+    int      status= fqry_ppmdim("original.ppm", &w, &h);
     if(status != 0) printf("bad: %d", status);
     t3u8 *buf= malloc(w * h * sizeof *buf);
-    readimg  = (struct raster_3u8){buf, w, w, h, FMT_RGB};
-    status   = freadbppm(f, readimg);
+    readimg  = (struct raster_3u8){buf, w, w, h};
+    status   = fr_ppm("original.ppm", &readimg);
     if(status != 0) printf("bad %d", status);
     writeppm("readback.ppm", readimg.buf, readimg.pxw, readimg.pxh);
-    fclose(f);
   }
 
   free(img.buf);

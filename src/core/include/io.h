@@ -1,23 +1,14 @@
 #pragma once
 
-#include <stdio.h>
-
 #include "include/defs.h"
 
-int prnbppm(
-  const t3u8 *px,
-  unsigned            w,
-  unsigned            h,
-  byte               *img,
-  unsigned            imgcap);
+int fw_ppm(const char *path, struct raster_3u8 img);
 
-int fwritebppm(FILE *f, const t3u8 *px, unsigned w, unsigned h);
+// reads path into caller-allocated *out, truncating to out's pxw/pxh when the
+// file is larger. call fqry_ppmdim first if you need to size the buffer exactly.
+int fr_ppm(const char *path, struct raster_3u8 *out);
+int fqry_ppmdim(const char *path, unsigned *w, unsigned *h);
 
-//always call fprsbppmhdr before this
-int freadbppm(FILE *f, struct raster_3u8 data);
-//do not call freadbppm before this 
-int fprsbppmhdr(FILE *f, unsigned *w, unsigned *h);
-
-isize fsize(const char *path);
-int fread_b(const char *path, u8 *buf, usize cap);
-int femitspv(const char *rpath, const char *wpath);
+isize fqry_sz(const char *path);
+int   fr_b(const char *path, u8 *buf, usize cap);
+int   fw_spvh(const char *rpath, const char *wpath);

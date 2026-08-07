@@ -35,9 +35,7 @@ int main(void)
     }
   }
 
-  FILE *f= fopen("sphere.ppm", "wb");
-  fwritebppm(f, img.buf, W, H);
-  fclose(f);
+  fw_ppm("sphere.ppm", img);
   free(img.buf);
   return 0;
 }

@@ -7,9 +7,6 @@
 
 int main(int argc, char *argv[])
 {
-  // make sure pointers exist at fail:
-  FILE *f  = NULL;
-  FILE *f2 = NULL;
   t3u8 *out= NULL;
   u32  *acc= NULL;
   int   rc = EXIT_FAILURE;
@@ -25,34 +22,27 @@ int main(int argc, char *argv[])
   t3u8 BL  = {0, 0, 255};
   t3u8 px[]= {R, W, B, BL};
 
-  struct raster_3u8 small= {px, 2, 2, 2, FMT_RGB};
-
-  f= fopen("out_mag.ppm", "wb");
-  if(!f) goto exit;
+  struct raster_3u8 small= {px, 2, 2, 2};
 
   const int bytes= small.pxh * small.pxw * sizeof *small.buf;
   out            = malloc(bytes * mag * mag);
   if(!out) goto exit;
   struct raster_3u8 img= upsample_3u8(small, out, mag);
 
-  rc= fwritebppm(f, img.buf, img.pxw, img.pxh);
+  rc= fw_ppm("out_mag.ppm", img);
   if(rc != 0) goto exit;
 
   rc= EXIT_FAILURE;
 
-  f2= fopen("out_min.ppm", "wb");
-  if(!f2) goto exit;
   free(out);
   out= malloc((img.pxw / min) * (img.pxh / min) * sizeof *out);
   struct raster_3u8 min_img= {
-    out, img.pxw / min, img.pxw / min, img.pxh / min, FMT_RGB};
+    out, img.pxw / min, img.pxw / min, img.pxh / min};
   acc= malloc(min_img.pxw * 3 * sizeof *acc);
   dnsamplebx_3u8(img, min_img, min, acc);
 
-  rc= fwritebppm(f2, min_img.buf, 0, 0);
+  rc= fw_ppm("out_min.ppm", min_img);
 exit:
-  if(f) fclose(f);
-  if(f2) fclose(f2);
   if(out) free(out);
   if(acc) free(acc);
   return rc;

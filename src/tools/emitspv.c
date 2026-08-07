@@ -9,5 +9,5 @@ int main(int argc, char **argv)
     fprintf(stderr, "usage: emitspv <input.spv> <output.h>\n");
     return 1;
   }
-  return femitspv(argv[1], argv[2]);
+  return fw_spvh(argv[1], argv[2]);
 }

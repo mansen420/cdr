@@ -59,25 +59,25 @@ int main(int argc, char **argv)
 
   // prepare shader
   {
-    const char *path  = argc > 1 ? argv[1] : NULL;
-    usize       spvlen= 0;
-		const u32 *spvoremb= spv;
-		
+    const char *path    = argc > 1 ? argv[1] : NULL;
+    usize       spvlen  = 0;
+    const u32  *spvoremb= spv;
+
     if(path)
     {
-      spvlen= fsize(path);
+      spvlen= fqry_sz(path);
       OK(spvlen, goto exit;)
 
       spv= malloc(spvlen);
       NNUL(spv, goto exit;)
-      OK(fread_b(path, (u8 *)spv, spvlen), goto exit;)
-			spvoremb= spv;
+      OK(fr_b(path, (u8 *)spv, spvlen), goto exit;)
+      spvoremb= spv;
     }
-		else
-		{
-			spvoremb= assets_shader_spv;
-			spvlen= len_assets_shader_spv;
-		}
+    else
+    {
+      spvoremb= assets_shader_spv;
+      spvlen  = len_assets_shader_spv;
+    }
 
     OK(gfxinit_ppl(
          gfx,
