@@ -52,11 +52,11 @@ enum
 
 typedef struct
 {
-  u32     binding;
-  u32     stride;
-  u32     rate;  // GFX_RATE_VERTEX or GFX_RATE_INSTANCE
+  u32          binding;
+  u32          stride;
+  u32          rate;  // GFX_RATE_VERTEX or GFX_RATE_INSTANCE
   gfxdesc_attr attrs[GFX_MAX_ATTRS];
-  u32     nrattrs;
+  u32          nrattrs;
 } gfxdesc_bufbind;
 
 typedef struct
@@ -123,7 +123,7 @@ typedef struct
 typedef struct
 {
   gfxdesc_shader    program[GFX_MAX_SHADERS];
-	u32 nrshaders;
+  u32               nrshaders;
   gfxdesc_bufbind   bindings[GFX_MAX_BINDINGS];
   u32               nrbindings;
   gfxdesc_pushrange ranges[GFX_MAX_RANGES];
@@ -140,8 +140,15 @@ void gfxterm_ppl(gfxctx *, gfxppl *);
 
 typedef struct
 {
-  gfximg *outputs[GFX_MAX_PASS_IMGS];
-  u32     nroutputs;
+  gfximg *img;
+  int     clear;  // 1 means clear, 0 is undefined, usually a no-op
+  t4f32   clearval;  // ignored if clear == 0
+} gfxdesc_attch;
+
+typedef struct
+{
+  gfxdesc_attch outputs[GFX_MAX_PASS_IMGS];
+  u32           nroutputs;
 } gfxdesc_pass;
 
 typedef struct gfxpass gfxpass;
@@ -173,7 +180,7 @@ typedef struct
   struct
   {
     gfxdesc_upload mem;
-    u32         stages;
+    u32            stages;
   } push;
 } gfxdesc_drawcmd;
 

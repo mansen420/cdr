@@ -104,7 +104,12 @@ int main(int argc, char **argv)
     gfxinit_img(
       gfx, &fb, NULL, (gfxdesc_img){.w= 800, .h= 600, .fmt= GFXFMT_BGRA8_SRGB}),
     goto exit;)
-  OK(gfxinit_pass(gfx, &pass, (gfxdesc_pass){.outputs= {fb}, .nroutputs= 1}),
+  OK(gfxinit_pass(
+       gfx,
+       &pass,
+       (gfxdesc_pass){
+         .outputs  = {(gfxdesc_attch){fb, 1, {0.0f, 0.0f, 0.01f, 1.f}}},
+         .nroutputs= 1}),
      goto exit;)
 
   dpyset_onrsz(dpy, on_resize);

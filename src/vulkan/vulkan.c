@@ -701,7 +701,8 @@ err:
   return -1;
 }
 
-int gfxinit_buf(gfxctx *c, gfxbuf **o, gfxmem *m, gfxdesc_buf d, gfxdesc_upload up)
+int gfxinit_buf(
+  gfxctx *c, gfxbuf **o, gfxmem *m, gfxdesc_buf d, gfxdesc_upload up)
 {
   return init_buf(c, o, m, d, up);
 }
@@ -858,8 +859,7 @@ static int init_devmem(vkctx *ctx, gfxmem_dev **out, usize bytes)
   mem= cdralloc(NULL, sizeof *mem);
   NNUL(mem, goto err;)
 
-  OK(arenainit(
-       &mem->base, ctx, bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
+  OK(arenainit(&mem->base, ctx, bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
      goto err;)
 
   *out= mem;
@@ -881,10 +881,10 @@ static int init_hostmem(vkctx *ctx, gfxmem_host **out, usize bytes)
 
   // try rBAR first (device-local + host-visible), fall back to plain RAM
   VkMemoryPropertyFlags rbar= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-  VkMemoryPropertyFlags ram = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  VkMemoryPropertyFlags ram=
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
   if(arenainit(&mem->base, ctx, bytes, rbar) < 0)
     OK(arenainit(&mem->base, ctx, bytes, ram), goto err;)
@@ -1299,7 +1299,7 @@ static int submit(vkctx *ctx, gfxpass *p)
   IF(!p->desc.nroutputs, goto err;)
 
   // use first output image to determine render area
-  gfximg *out0= p->desc.outputs[0];
+  gfximg *out0= p->desc.outputs[0].img;
   NNUL(out0, goto err;)
   VkExtent2D extent= {out0->desc.w, out0->desc.h};
 
@@ -1325,7 +1325,7 @@ static int submit(vkctx *ctx, gfxpass *p)
         .dstAccessMask   = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
         .oldLayout       = VK_IMAGE_LAYOUT_UNDEFINED,
         .newLayout       = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .image           = p->desc.outputs[i]->img,
+        .image           = p->desc.outputs[i].img->img,
         .subresourceRange= {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
 
     VkDependencyInfo renderd= {
@@ -1338,10 +1338,18 @@ static int submit(vkctx *ctx, gfxpass *p)
     for(usize i= 0; i < p->desc.nroutputs; i++)
       attinfo[i]= (VkRenderingAttachmentInfo){
         .sType      = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView  = p->desc.outputs[i]->view,
+        .imageView  = p->desc.outputs[i].img->view,
         .imageLayout= VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .loadOp     = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        .storeOp    = VK_ATTACHMENT_STORE_OP_STORE};
+        .loadOp    = p->desc.outputs[i].clear ? VK_ATTACHMENT_LOAD_OP_CLEAR
+                                              : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .storeOp   = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue= {
+          .color.float32= {
+            p->desc.outputs[i].clearval.r,
+            p->desc.outputs[i].clearval.g,
+            p->desc.outputs[i].clearval.b,
+            p->desc.outputs[i].clearval.a,
+          }}};
 
     // TODO handle depth attachments
     VkRenderingInfo renderinfo= {
