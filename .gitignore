@@ -20,6 +20,7 @@
 !*.frag
 !*.md
 !*.sh
+!compile_flags.txt
 !*.clang-format
 !*.clangd
 
