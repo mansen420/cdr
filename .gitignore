@@ -8,6 +8,7 @@
 !include/
 !assets/
 !apps/
+!tools/
 !tests/
 !vendor/
 
