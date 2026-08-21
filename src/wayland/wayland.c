@@ -79,7 +79,6 @@ static void xdgping_h(void *data, struct xdg_wm_base *xdg_wm_base, uint32_t seri
 
 void *dpyget_nwin(wlctx *ctx) { return ctx->surf; }
 void *dpyget_ncon(wlctx *ctx) { return ctx->disp; }
-int   dpyqry_init(dpyctx *ctx) { return ctx && ctx->alive; }
 
 int dpyinit(dpyctx **out, const char *title, unsigned w, unsigned h, u32 flags)
 {
@@ -125,7 +124,6 @@ int dpyinit(dpyctx **out, const char *title, unsigned w, unsigned h, u32 flags)
   OK(res, goto fail;)
   wl_surface_commit(ctx->surf);
 
-  ctx->alive= 1;
   *out= ctx;
   return 0;
 fail:

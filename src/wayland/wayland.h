@@ -36,8 +36,6 @@ typedef struct dpyctx
   resizefn_t rszcb;
   closefn_t  clscb;
   void      *usrdata;
-
-  u32 alive;
 } wlctx;
 
 // handlers
@@ -55,7 +53,6 @@ static void xdgping_h(void *, struct xdg_wm_base *, uint32_t);
 int    dpyinit(dpyctx **, const char *, unsigned, unsigned, u32);
 void   dpyterm(dpyctx *);
 int    dpypoll(dpyctx *);
-int    dpyqry_init(dpyctx *);
 void  *dpyget_nwin(wlctx *);
 void  *dpyget_ncon(wlctx *);
 void   dpyset_usrdata(dpyctx *, void *);

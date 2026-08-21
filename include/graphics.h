@@ -210,7 +210,6 @@ typedef struct
 int  gfxinit(gfxctx **, dpyctx *, gfxdesc);
 void gfxterm(gfxctx *);
 int  gfxpresent(gfxctx *, gfximg *);
-int  gfxqry_init(gfxctx *);
 void gfxpause(gfxctx *);
 void gfxresume(gfxctx *);
 void gfxupdate(gfxctx *, i32 w, i32 h);

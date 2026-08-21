@@ -260,7 +260,6 @@ Here's how this plays out across the graphics API:
 | `gfxpause` | gfx | pause | *(context)* | Pause rendering |
 | `gfxresume` | gfx | resume | *(context)* | Resume rendering |
 | `gfxupdate` | gfx | update | *(context)* | Update context (e.g. on window resize) |
-| `gfxqry_init` | gfx | qry | init | Query whether the context is initialized |
 | `gfxget_display` | gfx | get | display | Get the current display/swapchain image |
 
 The display layer follows the same pattern:
@@ -277,7 +276,6 @@ The display layer follows the same pattern:
 | `dpyget_ncon` | dpy | get | ncon | Get native connection handle |
 | `dpyget_err` | dpy | get | err | Get the last error code |
 | `dpyget_errstr` | dpy | get | errstr | Get the error string for a code |
-| `dpyqry_init` | dpy | qry | init | Query whether the display is initialized |
 
 ### The same grammar applies to types
 
@@ -380,10 +378,6 @@ gfxterm_buf(gfx, buf);        // destroy
 `init` functions take a pointer-to-pointer (`gfxbuf **`) as an output parameter and return `int` (0 on success, negative on error). `term` functions take the context and the object to destroy, and return `void` -- destruction cannot fail.
 
 All `init` functions require the parent context as the first argument, because the object is allocated within that context's memory. All `term` functions also require the context, because the context owns the memory.
-
-### The `qry` verb
-
-`gfxqry_init` and `dpyqry_init` are "query" functions -- they return whether the context has been successfully initialized. The verb `qry` means "ask a yes/no question about the state of something."
 
 ### Why this naming scheme?
 

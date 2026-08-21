@@ -117,7 +117,6 @@ typedef struct gfxctx
   u32                        nrprsmodes;
   VkSurfaceFormatKHR         swpsfmt;
 
-  u32 alive;
 } vkctx;
 
 struct gfxbuf

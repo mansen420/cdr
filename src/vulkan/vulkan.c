@@ -374,8 +374,7 @@ static int init(vkctx **out, void *dpy, gfxdesc desc)
 
   OK(init_frame(ctx), goto err;)
 
-  ctx->alive= 1;
-  *out      = ctx;
+  *out= ctx;
   return 0;
 err:
   gfxterm(ctx);
@@ -596,7 +595,6 @@ int gfxinit(gfxctx **out, dpyctx *dpy, gfxdesc desc)
   return init(out, dpy, desc);
 }
 void    gfxterm(gfxctx *ctx) { term(ctx); }
-int     gfxqry_init(gfxctx *ctx) { return ctx && ctx->alive; }
 void    gfxpause(gfxctx *ctx) { ctx->pause= 1; }
 void    gfxresume(gfxctx *ctx) { ctx->pause= 0; }
 gfximg *gfxget_display(gfxctx *ctx) { return ctx->swp ? DISPLAY_IMG : NULL; }

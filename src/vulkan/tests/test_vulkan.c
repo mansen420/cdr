@@ -22,36 +22,6 @@ static int tests_failed = 0;
   } while(0)
 
 // ---------------------------------------------------------------------------
-// gfxqry_init
-// ---------------------------------------------------------------------------
-
-static void test_gfxqry_init_null(void)
-{
-  // NULL must return 0 and must not crash
-  int result = gfxqry_init(NULL);
-  CHECK(result == 0, "gfxqry_init(NULL) should return 0");
-}
-
-static void test_gfxqry_init_zeroed_struct(void)
-{
-  // A zeroed vkctx has alive==0, so gfxqry_init must return 0
-  vkctx ctx;
-  memset(&ctx, 0, sizeof ctx);
-  int result = gfxqry_init((gfxctx *)&ctx);
-  CHECK(result == 0, "gfxqry_init on zeroed vkctx should return 0 (alive==0)");
-}
-
-static void test_gfxqry_init_alive_set(void)
-{
-  // When alive is non-zero gfxqry_init must return non-zero
-  vkctx ctx;
-  memset(&ctx, 0, sizeof ctx);
-  ctx.alive = 1;
-  int result = gfxqry_init((gfxctx *)&ctx);
-  CHECK(result != 0, "gfxqry_init should return non-zero when alive==1");
-}
-
-// ---------------------------------------------------------------------------
 // alignup
 // ---------------------------------------------------------------------------
 
@@ -303,11 +273,6 @@ static void test_updata_direct_wrong_flags(void)
 
 int main(void)
 {
-  // gfxqry_init
-  test_gfxqry_init_null();
-  test_gfxqry_init_zeroed_struct();
-  test_gfxqry_init_alive_set();
-
   // alignup
   test_alignup_already_aligned();
   test_alignup_unaligned_rounds_up();
