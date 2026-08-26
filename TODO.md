@@ -31,6 +31,37 @@ a file-scope pointer since it is a singleton.
 
 ---
 
+## Wayland event-loop hardening (2026-08-22)
+
+The current `dpypoll()` implements a nonblocking
+`dispatch -> prepare -> flush -> poll -> read/cancel -> dispatch` cycle. Before
+the display layer is treated as general-purpose, settle the following behavior:
+
+- Handle `poll()` interruption (`EINTR`) without treating a healthy display
+  connection as failed.
+- Define callback reentrancy. In particular, prevent or explicitly reject a
+  callback recursively calling `dpypoll()` while the outer poll is dispatching.
+- Define callback-time destruction. Calling `dpyterm()` from a callback can
+  leave the active `dpypoll()` using a freed context; either forbid it or defer
+  destruction until dispatch completes.
+- Define the threading contract for polling, object mutation, and teardown.
+  Libwayland coordinates prepared socket readers, but it does not make the
+  display abstraction's object lifetimes and callbacks automatically safe.
+- Decide whether requests queued by callbacks should be flushed immediately or
+  on the next `dpypoll()` call. The latter is correct but adds one polling cycle
+  of latency.
+- Preserve progress after `wl_display_flush()` returns `EAGAIN`. A nonblocking
+  poll may leave requests queued, so an otherwise idle application needs a way
+  to retain `POLLOUT` interest and poll again.
+- Expand display error reporting beyond `DPYERR_INIT` so callers can distinguish
+  interruption, disconnection, protocol failure, and invalid arguments.
+- Consider bounding event dispatch per call. A large pending event queue can
+  make `dpypoll()` take significant time even though its socket timeout is zero.
+- Document that repeated zero-timeout polling requires external waiting, frame
+  pacing, or useful work to avoid a busy loop.
+
+---
+
 ## gfx status (updated 2026-08-07)
 
 The core path used by g2d is implemented: Vulkan/Wayland context creation,
