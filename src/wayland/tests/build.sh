@@ -5,6 +5,7 @@ outdir="${1:-/tmp/cdr-wayland-presentation-tests}"
 mkdir -p "$outdir"
 
 for testsrc in \
+  src/wayland/tests/test_present_alpha.c \
   src/wayland/tests/test_present_gradient.c \
   src/wayland/tests/test_present_once.c \
   src/wayland/tests/test_present_solid.c

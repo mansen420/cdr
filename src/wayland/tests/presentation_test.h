@@ -51,6 +51,15 @@ static uint32_t prestest_argb(uint8_t r, uint8_t g, uint8_t b)
   return UINT32_C(0xff000000) | (uint32_t)r << 16 | (uint32_t)g << 8 | b;
 }
 
+static uint32_t
+prestest_argb_alpha(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+{
+  r= (uint8_t)((uint32_t)r * a / 255);
+  g= (uint8_t)((uint32_t)g * a / 255);
+  b= (uint8_t)((uint32_t)b * a / 255);
+  return (uint32_t)a << 24 | (uint32_t)r << 16 | (uint32_t)g << 8 | b;
+}
+
 static void prestest_fill(imgview img, uint32_t color)
 {
   for(usize y= 0; y < img.pxh; y++)
