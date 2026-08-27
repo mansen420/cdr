@@ -20,6 +20,8 @@ static const t2f32 RANGE_CANON= {-1.f, 1.f};
 static inline int zero_f32eps(f32 f, f32 eps) { return fabsf(f) <= eps; }
 static inline int zero_f32(f32 f) { return zero_f32eps(f, 1e-8f); }
 static inline int zero_3(t3f32 u) { return zero_f32(dot_3(u, u)); }
+static inline f32 min_f32(f32 a, f32 b) { return a < b ? a : b; }
+static inline f32 max_f32(f32 a, f32 b) { return a > b ? a : b; }
 
 static inline f32 linmap_f32(f32 x, t2f32 fro, t2f32 to)
 {

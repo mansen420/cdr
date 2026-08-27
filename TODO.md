@@ -37,6 +37,21 @@ The current `dpypoll()` implements a nonblocking
 `dispatch -> prepare -> flush -> poll -> read/cancel -> dispatch` cycle. Before
 the display layer is treated as general-purpose, settle the following behavior:
 
+### Completed in the current Wayland display work
+
+- Split connection-global state (`dpyctx`) from per-window state (`dpysrf`).
+- Store compositor-configured width and height independently, falling back to
+  the application's preferred dimension when the compositor sends zero.
+- Add SHM format discovery and a CPU-drawable, triple-buffered swapchain.
+- Track acquired, compositor-owned, and released buffers; presentation queues a
+  commit without blocking and `dpypoll()` receives buffer-release events.
+- Document that platform requests are progressed by user-driven `dpypoll()` and
+  that successful presentation does not mean the frame appeared onscreen.
+- Add interactive tests for one-shot presentation, repeated solid colors,
+  animated gradients, and premultiplied-alpha composition.
+
+### Still open
+
 - Handle `poll()` interruption (`EINTR`) without treating a healthy display
   connection as failed.
 - Define callback reentrancy. In particular, prevent or explicitly reject a
@@ -59,6 +74,41 @@ the display layer is treated as general-purpose, settle the following behavior:
   make `dpypoll()` take significant time even though its socket timeout is zero.
 - Document that repeated zero-timeout polling requires external waiting, frame
   pacing, or useful work to avoid a busy loop.
+
+---
+
+## Display events and errors (2026-08-26)
+
+The original callback-plus-single-error design no longer represents the full
+display state machine. Redesign it while keeping these categories separate:
+
+- **Immediate operation results:** invalid arguments, allocation failure,
+  unsupported capabilities, or temporary unavailability such as no released
+  swapchain image. Define stable result codes and distinguish retryable results
+  from fatal failures.
+- **Asynchronous events:** surface configure/resize, close request, frame-ready,
+  presentation feedback, and platform/display failure. Prefer a per-context
+  event queue consumed outside native event dispatch; callbacks may remain as a
+  convenience layer over that queue.
+- **Persistent context state:** connection loss or another fatal backend error
+  that makes later operations invalid. Define how the first fatal error is
+  retained and how its backend-specific diagnostic can be queried.
+
+Decide the event API and its lifetime rules:
+
+- Define `dpypoll()` as platform I/O/dispatch and a separate function for
+  popping already-queued display events.
+- Define queue capacity, overflow behavior, event ordering, and whether resize
+  events may be coalesced.
+- Events referring to `dpysrf`/`dpyswp` need explicit object-lifetime rules so
+  queued events cannot retain dangling pointers after destruction.
+- Keep `wl_buffer.release` as buffer-availability state unless callers truly
+  need it as a public event. It is not proof that a frame was displayed.
+- Add `wl_surface.frame` for frame pacing. If actual presented/discarded feedback
+  is exposed, use the Wayland presentation-time protocol and define an
+  equivalent or explicitly unsupported contract for other backends.
+- Specify whether events and result/error strings expose portable codes,
+  backend-native codes, or both.
 
 ---
 
