@@ -349,3 +349,22 @@ typedef struct raster_4f32
   unsigned   stride;  // elements of buf per row
   unsigned   pxw, pxh;
 } raster_4f32;
+
+typedef struct rasterf
+{
+  f32     *buf;
+  unsigned   stride;  // elements of buf per row
+  unsigned   pxw, pxh;
+} rasterf;
+typedef struct raster_u8
+{
+  u8     *buf;
+  unsigned   stride;  // elements of buf per row
+  unsigned   pxw, pxh;
+} raster_u8;
+typedef struct raster_u32
+{
+  u32     *buf;
+  unsigned   stride;  // elements of buf per row
+  unsigned   pxw, pxh;
+} raster_u32;

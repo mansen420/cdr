@@ -1,5 +1,7 @@
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -45,6 +47,8 @@ int main(void)
   dpyctx *dpy= NULL;
   dpysrf *srf= NULL;
   dpyswp *swp= NULL;
+  f32    *zmem= NULL;
+  rasterf zbuf= {0};
 
   if(dpyinit(&dpy, 0) < 0) goto exit;
   if(dpyinit_srf(
@@ -59,7 +63,6 @@ int main(void)
 
   u64 loop_sum    = 0;
   u64 report_begin= now_ns();
-  u64 frame       = 0;
   u32 loop_count  = 0;
   u32 frame_count = 0;
   int startup_done= 0;
@@ -71,7 +74,7 @@ int main(void)
     imgview img= dpyacq_nextbuf(swp);
     if(img.data)
     {
-      fill(img, UINT32_C(0xff181a20));
+      fill(img, UINT32_C(0x00181a20));
 
       raster_4u8 target= {
         .buf   = img.data,
@@ -79,28 +82,58 @@ int main(void)
         .pxw   = (u32)img.pxw,
         .pxh   = (u32)img.pxh};
 
-      u32 step= (u32)frame;
-      swgeo_2tri moving[]= {
-        {{(f32)((step * 2) % target.pxw),
-          (f32)((step * 1) % target.pxh)},
-         {(f32)((step * 2 + 20) % target.pxw),
-          (f32)((step * 1 + 30) % target.pxh)},
-         {(f32)((step * 2 + 40) % target.pxw),
-          (f32)((step * 1 + 4) % target.pxh)}},
-      };
-      swgeo_2tri green[]= {
-        {{260.f, 170.f}, {570.f, 430.f}, {100.f, 370.f}},
-      };
-      swgeo_2tri blue[]= {
-        {{-100.f, 180.f}, {180.f, 520.f}, {230.f, 250.f}},
-      };
+      if(!zmem)
+      {
+        zmem= malloc(target.pxw * target.pxh * sizeof *zmem);
+        if(!zmem) goto exit;
+        zbuf= (rasterf){
+          .buf= zmem, .stride= target.pxw, .pxw= target.pxw, .pxh= target.pxh};
+      }
+      for(usize i= 0; i < (usize)zbuf.pxw * zbuf.pxh; i++)
+        zmem[i]= -INFINITY;
 
-      swrast_tri(moving, 1, target, argb_mask(235, 70, 80, 210));
-      swrast_tri(green, 1, target, argb_mask(70, 220, 120, 210));
-      swrast_tri(blue, 1, target, argb_mask(70, 120, 245, 210));
+      static const t3f32 vertices[8]= {
+        {-1.f, -1.f, -1.f},
+        {1.f, -1.f, -1.f},
+        {1.f, 1.f, -1.f},
+        {-1.f, 1.f, -1.f},
+        {-1.f, -1.f, 1.f},
+        {1.f, -1.f, 1.f},
+        {1.f, 1.f, 1.f},
+        {-1.f, 1.f, 1.f},
+      };
+      static const u8 indices[12][3]= {
+        {0, 2, 1}, {0, 3, 2},  // back
+        {4, 5, 6}, {4, 6, 7},  // front
+        {0, 4, 7}, {0, 7, 3},  // left
+        {1, 2, 6}, {1, 6, 5},  // right
+        {3, 7, 6}, {3, 6, 2},  // top
+        {0, 1, 5}, {0, 5, 4},  // bottom
+      };
+      f32 bounds[3][2]= {
+        {1.f, -1.f}, {.75f, -.75f}, {-1.f, -20.f}};
+      t3f32 campos= {3.f, 2.f, 4.f};
+      t3f32 lookat= {0.f, 0.f, 0.f};
+      t3f32 up    = {0.f, 1.f, 0.f};
+
+      t3f32 screenverts[8];
+      for(u32 i= 0; i < 8; i++)
+      {
+        t4f32 p= {vertices[i].x, vertices[i].y, vertices[i].z, 1.f};
+        p= swxform_cam(campos, lookat, up, p);
+        p= swxform_ndc(bounds, p);
+        p= swxform_scrspace(target.pxw, target.pxh, p);
+        screenverts[i]= (t3f32){p.x, p.y, p.z};
+      }
+
+      swgeo_3tri cube[12];
+      for(u32 tri= 0; tri < 12; tri++)
+        for(u32 vert= 0; vert < 3; vert++)
+          cube[tri][vert]= screenverts[indices[tri][vert]];
+
+      swrast_tri(cube, 12, target, zbuf, argb_mask(255, 255, 255, 255));
 
       if(dpypresent(dpy, srf, swp) < 0) goto exit;
-      frame++;
       frame_count++;
 
       if(!startup_done)
@@ -132,6 +165,7 @@ int main(void)
 
   rc= 0;
 exit:
+  free(zmem);
   dpyterm_swp(swp);
   dpyterm_srf(dpy, srf);
   dpyterm(dpy);

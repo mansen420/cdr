@@ -41,7 +41,7 @@ static void matmul4(mat4f out, mat4f a, mat4f b)
 
 // transforms p from view-space (bounds), into NDC
 // bounds are right, left, top, bottom, near, far
-static vec4f ndc_xform(f32 bounds[3][2], vec4f p)
+vec4f swxform_ndc(f32 bounds[3][2], vec4f p)
 {
   f32 r= bounds[0][0], l= bounds[0][1], t= bounds[1][0], b= bounds[1][1],
       n= bounds[2][0], f= bounds[2][1];
@@ -68,7 +68,7 @@ static vec4f ndc_xform(f32 bounds[3][2], vec4f p)
 }
 
 // maps NDC into raster coordinates with a top-left origin
-static vec4f scrspace_xform(u32 pxw, u32 pxh, vec4f p)
+vec4f swxform_scrspace(u32 pxw, u32 pxh, vec4f p)
 {
   if(!pxw || !pxh) return (vec4f){0};
 
@@ -78,7 +78,7 @@ static vec4f scrspace_xform(u32 pxw, u32 pxh, vec4f p)
     p.z,
     p.w};
 }
-static vec4f xform_cam(vec3f campos, vec3f lookat, vec3f up, vec4f p)
+vec4f swxform_cam(vec3f campos, vec3f lookat, vec3f up, vec4f p)
 {
   vec3f u, v, w;
   vec3f gaze= sub3(lookat, campos);
@@ -113,7 +113,8 @@ static inline f32 edge(t2f32 i, t2f32 j, t2f32 p)
 // writes mask into raster where the triangle covers
 // coordinate space is: [(0, 0), (pxw - 1, pxh - 1)]. (0, 0) at top left corner,
 // positive x right, positive y down. (0.0, 0.0) is the center of pixel (0, 0)
-static void rasterize_tri(t2f32 tri[3], raster_4u8 r, t4u8 mask)
+// triangle coordinates are {x_scr, y_scr, z_clip}
+static void rasterize_tri(t3f32 tri[3], raster_4u8 r, t4u8 mask, rasterf zbuf)
 {
   NNUL(r.buf && r.pxh && r.pxw, return;)
 
@@ -162,7 +163,8 @@ static void rasterize_tri(t2f32 tri[3], raster_4u8 r, t4u8 mask)
 
   for(u32 y= y_min; y <= y_max; y++)
   {
-    t4u8 *row= r.buf + (r.stride * y);
+    t4u8 *row = r.buf + (r.stride * y);
+    f32  *zrow= zbuf.buf + (zbuf.stride * y);
     for(u32 x= x_min; x <= x_max; x++)
     {
       f32 alp, bet, gam;
@@ -182,7 +184,10 @@ static void rasterize_tri(t2f32 tri[3], raster_4u8 r, t4u8 mask)
              (t2f32){x, y}) /
            p01;
       if(alp < 0.f || bet < 0.f || gam < 0.f) continue;
-
+      // compute z value for current point
+      f32 depth= alp * tri[0].z + bet * tri[1].z + gam * tri[2].z;
+      if(depth < zrow[x]) continue;
+      zrow[x]= depth;
       // testing
       mask.x= alp * 255;
       mask.y= bet * 255;
@@ -192,9 +197,11 @@ static void rasterize_tri(t2f32 tri[3], raster_4u8 r, t4u8 mask)
   }
 }
 
-void swrast_tri(swgeo_2tri *tris, u32 tricnt, raster_4u8 r, t4u8 mask)
+void swrast_tri(
+  swgeo_3tri *tris, u32 tricnt, raster_4u8 r, rasterf zbuf, t4u8 mask)
 {
-  NNUL(tris, return;)
+  NNUL(tris && zbuf.buf, return;)
+  if(zbuf.pxw < r.pxw || zbuf.pxh < r.pxh || zbuf.stride < r.pxw) return;
 
-  for(u32 i= 0; i < tricnt; i++) rasterize_tri(tris[i], r, mask);
+  for(u32 i= 0; i < tricnt; i++) rasterize_tri(tris[i], r, mask, zbuf);
 }
